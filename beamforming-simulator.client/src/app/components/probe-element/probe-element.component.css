@@ -1,0 +1,251 @@
+/* ══════════════════════════════════════════════════════════════════
+   ProbeElementComponent styles
+   ══════════════════════════════════════════════════════════════════ */
+
+:host {
+  display: block;
+}
+
+/* ── Shell ──────────────────────────────────────────────────────── */
+.probe-element {
+  --el-color: #1a73e8;
+  background   : var(--bg-surface);
+  border       : 1px solid var(--border);
+  border-radius: var(--radius-md);
+  display      : flex;
+  flex-direction: column;
+  gap          : 0;
+  overflow     : hidden;
+  cursor       : pointer;
+  transition   : border-color 150ms, box-shadow 150ms;
+  box-shadow   : var(--shadow-sm);
+}
+
+.probe-element:hover {
+  border-color : var(--el-color);
+  box-shadow   : 0 0 0 1px var(--el-color)22, var(--shadow-md);
+}
+
+.probe-element.selected {
+  border-color : var(--el-color);
+  box-shadow   : 0 0 0 2px var(--el-color)44, var(--shadow-md);
+}
+
+.probe-element.disabled {
+  opacity: 0.55;
+}
+
+/* ── Header ─────────────────────────────────────────────────────── */
+.el-header {
+  display    : flex;
+  align-items: center;
+  gap        : 8px;
+  padding    : 7px 10px 6px;
+  border-bottom: 1px solid var(--border-light);
+  background : linear-gradient(135deg, var(--el-color)0d 0%, transparent 70%);
+}
+
+.el-badge {
+  min-width    : 26px;
+  height       : 20px;
+  border-radius: 4px;
+  display      : flex;
+  align-items  : center;
+  justify-content: center;
+  font-size    : 10px;
+  font-weight  : 700;
+  color        : #fff;
+  letter-spacing: 0.05em;
+  flex-shrink  : 0;
+  padding      : 0 5px;
+}
+
+.el-header-info {
+  display : flex;
+  gap     : 8px;
+  flex    : 1;
+  min-width: 0;
+}
+
+.el-freq,
+.el-phase {
+  font-family: var(--font-mono);
+  font-size  : 10px;
+  font-weight: 600;
+  color      : var(--text-secondary);
+  white-space: nowrap;
+}
+
+.el-freq { color: var(--el-color); }
+
+.el-actions {
+  display : flex;
+  gap     : 3px;
+  flex-shrink: 0;
+}
+
+.el-icon-btn {
+  width       : 22px;
+  height      : 22px;
+  border      : 1px solid var(--border);
+  border-radius: 5px;
+  background  : transparent;
+  color       : var(--text-muted);
+  cursor      : pointer;
+  display     : flex;
+  align-items : center;
+  justify-content: center;
+  transition  : all 120ms;
+  padding     : 0;
+}
+
+.el-icon-btn svg { width: 13px; height: 13px; }
+
+.el-icon-btn:hover {
+  background : var(--bg-hover);
+  color      : var(--text-primary);
+  border-color: var(--accent-blue);
+}
+
+.el-icon-btn.active {
+  background : var(--el-color)22;
+  color      : var(--el-color);
+  border-color: var(--el-color)55;
+}
+
+.el-icon-btn.delete-btn:hover {
+  background : rgba(220,38,38,0.1);
+  color      : var(--accent-red);
+  border-color: var(--accent-red)55;
+}
+
+/* ── Wave canvas ─────────────────────────────────────────────────── */
+.wave-canvas-wrap {
+  position   : relative;
+  height     : 56px;
+  background : #f8fafd;
+  flex-shrink: 0;
+}
+
+.wave-canvas {
+  display: block;
+  width  : 100%;
+  height : 100%;
+}
+
+.canvas-overlay-label {
+  position  : absolute;
+  inset     : 0;
+  display   : flex;
+  align-items: center;
+  justify-content: center;
+  font-size : 9px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color     : var(--text-muted);
+  background: rgba(248,250,253,0.7);
+  pointer-events: none;
+}
+
+/* ── Controls ────────────────────────────────────────────────────── */
+.el-controls {
+  display       : flex;
+  flex-direction: column;
+  gap           : 8px;
+  padding       : 10px;
+  background    : var(--bg-surface);
+}
+
+.ctrl-row {
+  display       : flex;
+  flex-direction: column;
+  gap           : 3px;
+}
+
+.ctrl-lbl {
+  display    : flex;
+  justify-content: space-between;
+  font-size  : 10px;
+  font-weight: 600;
+  color      : var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.ctrl-val {
+  font-family: var(--font-mono);
+  color      : var(--el-color);
+  font-weight: 700;
+  font-size  : 10px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.ctrl-slider {
+  -webkit-appearance: none;
+  appearance : none;
+  width      : 100%;
+  height     : 3px;
+  border-radius: 2px;
+  background : #e2e8f0;
+  cursor     : pointer;
+  accent-color: var(--el-color);
+}
+
+.ctrl-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width      : 12px;
+  height     : 12px;
+  border-radius: 50%;
+  background : var(--el-color);
+  cursor     : pointer;
+  box-shadow : 0 1px 3px rgba(0,0,0,0.3);
+}
+
+.ctrl-slider::-moz-range-thumb {
+  width      : 12px;
+  height     : 12px;
+  border-radius: 50%;
+  background : var(--el-color);
+  border     : none;
+  cursor     : pointer;
+}
+
+/* Intensity special row */
+.intensity-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.intensity-bar {
+  height       : 2px;
+  background   : #e2e8f0;
+  border-radius: 1px;
+  overflow     : hidden;
+}
+
+.intensity-fill {
+  height    : 100%;
+  background: linear-gradient(90deg, var(--el-color), var(--el-color)aa);
+  transition: width 100ms;
+}
+
+/* ── Compact layout ──────────────────────────────────────────────── */
+.probe-element.compact .el-header {
+  padding: 5px 8px;
+}
+
+.probe-element.compact .wave-canvas-wrap {
+  height: 36px;
+}
+
+.el-compact-info {
+  display    : flex;
+  gap        : 10px;
+  padding    : 4px 8px 5px;
+  font-family: var(--font-mono);
+  font-size  : 9px;
+  color      : var(--text-muted);
+  border-top : 1px solid var(--border-light);
+}

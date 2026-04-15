@@ -1,1 +1,241 @@
-/* You can add global styles to this file, and also import other style files */
+/* ══════════════════════════════════════════════════════════════════
+   styles.css  –  Global design tokens, resets, and shared utilities
+   Matches the design language of the provided CSS reference files.
+   ══════════════════════════════════════════════════════════════════ */
+
+/* ── Google Fonts ────────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;700&display=swap');
+
+/* ══ ROOT TOKENS ════════════════════════════════════════════════════ */
+:root {
+  /* Backgrounds */
+  --bg-app        : #f0f4f8;
+  --bg-surface    : #ffffff;
+  --bg-input-hd   : #f0f7ff;
+  --bg-output-hd  : #f0fff4;
+  --bg-hover      : #f0f7ff;
+  --bg-active     : #e8f0fe;
+
+  /* Borders */
+  --border        : #d8e2ee;
+  --border-focus  : #1a73e8;
+  --border-light  : #e8edf3;
+
+  /* Text */
+  --text-primary  : #1a2b4a;
+  --text-secondary: #4a6a8a;
+  --text-muted    : #7a8fa6;
+  --text-label    : #94a3b8;
+
+  /* Accents */
+  --accent-blue   : #1a73e8;
+  --accent-blue-bg: #e8f0fe;
+  --accent-green  : #34a853;
+  --accent-green-bg:#f0fff4;
+  --accent-yellow : #e8a82b;
+  --accent-red    : #dc2626;
+
+  /* Shadows */
+  --shadow-sm     : 0 1px 3px rgba(0,0,0,0.05);
+  --shadow-md     : 0 1px 4px rgba(0,0,0,0.08);
+
+  /* Radius */
+  --radius-sm     : 6px;
+  --radius-md     : 10px;
+  --radius-lg     : 14px;
+
+  /* Layout */
+  --topbar-h      : 52px;
+
+  /* Typography */
+  --font-ui       : 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --font-mono     : 'IBM Plex Mono', 'Fira Code', monospace;
+}
+
+/* ══ RESET ══════════════════════════════════════════════════════════ */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin    : 0;
+  padding   : 0;
+}
+
+html, body {
+  height  : 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family           : var(--font-ui);
+  font-size             : 13px;
+  background            : var(--bg-app);
+  color                 : var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  overflow              : hidden;
+}
+
+/* ══ SCROLLBAR THEME ════════════════════════════════════════════════ */
+::-webkit-scrollbar         { width: 5px; height: 5px; }
+::-webkit-scrollbar-track   { background: transparent; }
+::-webkit-scrollbar-thumb   { background: #c8d5e2; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #a0b4c8; }
+
+/* ══ SHARED UTILITY CLASSES ════════════════════════════════════════ */
+
+/* Used across sidebar/ctrl panels */
+.ctrl-section {
+  padding      : 12px 14px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.section-label {
+  font-size    : 10px;
+  font-weight  : 700;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color        : var(--text-muted);
+  margin-bottom: 10px;
+  display      : block;
+}
+
+.ctrl-group          { margin-bottom: 10px; }
+.ctrl-group:last-child { margin-bottom: 0; }
+
+.ctrl-label {
+  display        : flex;
+  justify-content: space-between;
+  font-size      : 11px;
+  font-weight    : 500;
+  color          : var(--text-secondary);
+  margin-bottom  : 5px;
+}
+
+.ctrl-label .val {
+  font-family: var(--font-mono);
+  color      : var(--accent-blue);
+  font-weight: 700;
+  font-size  : 11px;
+}
+
+/* Slider */
+.styled-slider {
+  -webkit-appearance: none;
+  appearance  : none;
+  width       : 100%;
+  height      : 4px;
+  border-radius: 2px;
+  background  : #e2e8f0;
+  cursor      : pointer;
+  accent-color: var(--accent-blue);
+  display     : block;
+  margin-top  : 6px;
+}
+
+.styled-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width       : 13px;
+  height      : 13px;
+  border-radius: 50%;
+  background  : var(--accent-blue);
+  cursor      : pointer;
+  box-shadow  : 0 1px 3px rgba(26,115,232,0.4);
+}
+
+.styled-slider::-moz-range-thumb {
+  width       : 13px;
+  height      : 13px;
+  border-radius: 50%;
+  background  : var(--accent-blue);
+  border      : none;
+  cursor      : pointer;
+}
+
+/* Toggle row */
+.toggle-row {
+  display     : flex;
+  border      : 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow    : hidden;
+}
+
+.toggle-btn {
+  flex        : 1;
+  padding     : 5px 8px;
+  border      : none;
+  border-right: 1px solid var(--border);
+  background  : var(--bg-surface);
+  color       : var(--text-muted);
+  font-family : var(--font-ui);
+  font-size   : 11px;
+  font-weight : 500;
+  cursor      : pointer;
+  transition  : all 140ms;
+}
+
+.toggle-btn:last-child { border-right: none; }
+
+.toggle-btn:hover:not(.active) {
+  background: var(--bg-hover);
+  color     : var(--text-primary);
+}
+
+.toggle-btn.active {
+  background : var(--accent-blue-bg);
+  color      : var(--accent-blue);
+  font-weight: 600;
+}
+
+/* Select */
+.styled-select {
+  width        : 100%;
+  appearance   : none;
+  background   : var(--bg-surface)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%237a8fa6'/%3E%3C/svg%3E")
+    no-repeat right 9px center;
+  border       : 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding      : 6px 28px 6px 10px;
+  color        : var(--text-primary);
+  font-family  : var(--font-ui);
+  font-size    : 12px;
+  cursor       : pointer;
+  transition   : border-color 140ms;
+}
+
+.styled-select:focus {
+  outline     : none;
+  border-color: var(--accent-blue);
+}
+
+/* Apply button */
+.apply-btn {
+  display    : flex;
+  align-items: center;
+  justify-content: center;
+  gap        : 7px;
+  width      : 100%;
+  padding    : 8px 16px;
+  background : var(--accent-blue);
+  color      : #fff;
+  border     : 1px solid var(--accent-blue);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-ui);
+  font-size  : 12px;
+  font-weight: 600;
+  cursor     : pointer;
+  transition : all 140ms;
+  box-shadow : 0 2px 6px rgba(26,115,232,0.25);
+}
+
+.apply-btn svg { width: 13px; height: 13px; }
+
+.apply-btn:hover:not(:disabled) {
+  background : #1558c0;
+  border-color: #1558c0;
+}
+
+.apply-btn:disabled {
+  opacity: 0.5;
+  cursor : not-allowed;
+}

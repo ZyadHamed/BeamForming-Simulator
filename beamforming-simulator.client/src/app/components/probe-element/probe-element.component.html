@@ -1,0 +1,129 @@
+<!-- ════════════════════════════════════════════════════════════════
+     ProbeElementComponent template
+     ════════════════════════════════════════════════════════════════ -->
+<div
+  class="probe-element"
+  [class.compact]="compact"
+  [class.selected]="selected"
+  [class.disabled]="!config.enabled"
+  [style.--el-color]="config.color"
+  (click)="onSelect()"
+>
+  <!-- ── Header ──────────────────────────────────────────────── -->
+  <div class="el-header">
+    <div class="el-badge" [style.background]="config.color">
+      {{ config.label }}
+    </div>
+
+    <div class="el-header-info">
+      <span class="el-freq">{{ config.frequency | number:'1.1-2' }} MHz</span>
+      <span class="el-phase">φ {{ config.phaseShift | number:'1.0-0' }}°</span>
+    </div>
+
+    <div class="el-actions">
+      <!-- Enable toggle -->
+      <button
+        class="el-icon-btn"
+        [class.active]="config.enabled"
+        [title]="config.enabled ? 'Disable element' : 'Enable element'"
+        (click)="toggleEnabled(); $event.stopPropagation()"
+      >
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6">
+          <circle cx="8" cy="8" r="5"/>
+          <path *ngIf="config.enabled" d="M5 8l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/>
+          <path *ngIf="!config.enabled" d="M6 6l4 4M10 6l-4 4" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <!-- Delete -->
+      <button
+        class="el-icon-btn delete-btn"
+        title="Remove element"
+        (click)="onDelete($event)"
+      >
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6">
+          <path d="M3 4h10M6 4V3h4v1M5 4l.5 9h5l.5-9" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Wave canvas ─────────────────────────────────────────── -->
+  <div class="wave-canvas-wrap">
+    <canvas #waveCanvas class="wave-canvas"></canvas>
+    <div class="canvas-overlay-label" *ngIf="!config.enabled">MUTED</div>
+  </div>
+
+  <!-- ── Controls (hidden in compact mode) ──────────────────── -->
+  <div class="el-controls" *ngIf="!compact">
+
+    <!-- Phase Shift -->
+    <div class="ctrl-row">
+      <label class="ctrl-lbl">
+        Phase
+        <span class="ctrl-val">{{ config.phaseShift | number:'1.0-0' }}°</span>
+      </label>
+      <input
+        type="range" class="ctrl-slider"
+        min="0" max="360" step="1"
+        [(ngModel)]="config.phaseShift"
+        (ngModelChange)="onParamChange()"
+      />
+    </div>
+
+    <!-- Time Delay -->
+    <div class="ctrl-row">
+      <label class="ctrl-lbl">
+        Delay
+        <span class="ctrl-val">{{ config.timeDelay | number:'1.1-2' }} µs</span>
+      </label>
+      <input
+        type="range" class="ctrl-slider"
+        min="0" max="50" step="0.1"
+        [(ngModel)]="config.timeDelay"
+        (ngModelChange)="onParamChange()"
+      />
+    </div>
+
+    <!-- Frequency -->
+    <div class="ctrl-row">
+      <label class="ctrl-lbl">
+        Freq
+        <span class="ctrl-val">{{ config.frequency | number:'1.1-2' }} MHz</span>
+      </label>
+      <input
+        type="range" class="ctrl-slider"
+        min="0.1" max="100" step="0.1"
+        [(ngModel)]="config.frequency"
+        (ngModelChange)="onParamChange()"
+      />
+    </div>
+
+    <!-- Intensity -->
+    <div class="ctrl-row">
+      <label class="ctrl-lbl">
+        Intensity
+        <span class="ctrl-val">{{ config.intensity | number:'1.0-0' }}%</span>
+      </label>
+      <div class="intensity-row">
+        <input
+          type="range" class="ctrl-slider"
+          min="0" max="100" step="1"
+          [(ngModel)]="config.intensity"
+          (ngModelChange)="onParamChange()"
+        />
+        <div class="intensity-bar">
+          <div class="intensity-fill" [style.width.%]="config.intensity"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── Compact summary (shown only in compact mode) ───────── -->
+  <div class="el-compact-info" *ngIf="compact">
+    <span>Δt {{ config.timeDelay | number:'1.1-1' }} µs</span>
+    <span>I {{ config.intensity }}%</span>
+    <span title="Apodization weight">W {{ (config.apodizationWeight ?? 1) | number:'1.2-2' }}</span>
+  </div>
+
+</div>

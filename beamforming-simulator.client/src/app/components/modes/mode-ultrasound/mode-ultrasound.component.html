@@ -1,0 +1,187 @@
+<!-- ════════════════════════════════════════════════════════════════
+     ModeUltrasoundComponent  (refactored)
+
+     Layout (top → bottom, left → right):
+     ┌─────────────────────────────────────────────────────────────┐
+     │  TOOLBAR  preset selector                                   │
+     ├──────────────┬──────────────────────────────────────────────┤
+     │              │  Wavefront Propagation  │  B-Mode Image      │
+     │   Probe      ├─────────────────────────────────────────────-│
+     │   Array      │  BeamformingViewer (panels 1–3)              │
+     │   Sidebar    │    Panel 1: probe mirror                     │
+     │              │    Panel 2: interference map                 │
+     │              │    Panel 3: beam profile + IFFT strip        │
+     ├──────────────┴──────────────────────────────────────────────┤
+     │  METRICS STRIP  (beam angle · main lobe · side lobe · …)   │
+     └─────────────────────────────────────────────────────────────┘
+     ════════════════════════════════════════════════════════════════ -->
+
+<div class="mode-layout">
+
+  <!-- ══ TOOLBAR ═══════════════════════════════════════════════════ -->
+  <header class="mode-toolbar">
+
+    <!-- Preset selector -->
+    <div class="preset-bar" *ngIf="ultrasoundPresets.length">
+      <span class="preset-label">Preset</span>
+      <select class="styled-select"
+        [(ngModel)]="selectedPreset"
+        (ngModelChange)="loadPreset($event)">
+        <option value="">— Select scenario —</option>
+        <option *ngFor="let p of ultrasoundPresets" [value]="p.name">{{ p.name }}</option>
+      </select>
+    </div>
+
+    <!-- Info pills -->
+    <div class="mode-toolbar__pills">
+      <span class="mode-pill mode-pill--blue">Ultrasound</span>
+      <span class="mode-pill mode-pill--green" *ngIf="beamResult">Computed</span>
+      <span class="mode-pill mode-pill--muted" *ngIf="!beamResult">Awaiting compute</span>
+      <span class="mode-pill mode-pill--amber">
+        {{ arrayConfig.numElements }} elements
+      </span>
+    </div>
+
+  </header>
+
+
+  <!-- ══ BODY: sidebar + main content ══════════════════════════════ -->
+  <div class="mode-body">
+
+    <!-- ── LEFT: Probe Array Sidebar ─────────────────────────────── -->
+    <aside class="mode-sidebar">
+      <div class="sidebar-array-wrap">
+        <app-probe-array
+          [arrayConfig]="arrayConfig"
+          label="Ultrasound Probe"
+          [showBeamResult]="true"
+          (configChange)="onArrayConfigChange($event)"
+          (beamResult)="onBeamResult($event)"
+        ></app-probe-array>
+      </div>
+    </aside>
+
+
+    <!-- ── RIGHT: Main viewport ───────────────────────────────────── -->
+    <main class="mode-main">
+
+      <!-- Row 1: Propagation + B-Mode -->
+      <div class="viewport-row">
+
+        <!-- Wavefront propagation -->
+        <div class="vp-card">
+          <div class="vp-header">
+            <span class="vp-title">Wavefront Propagation</span>
+            <span class="vp-badge blue">Live</span>
+          </div>
+          <div class="vp-canvas-wrap">
+            <canvas #propCanvas class="vp-canvas"></canvas>
+          </div>
+        </div>
+
+        <!-- B-mode depth map -->
+        <div class="vp-card narrow">
+          <div class="vp-header">
+            <span class="vp-title">B-Mode Image</span>
+            <span class="vp-badge amber">Mock</span>
+          </div>
+          <div class="vp-canvas-wrap">
+            <canvas #depthCanvas class="vp-canvas"></canvas>
+          </div>
+        </div>
+
+      </div><!-- /viewport-row 1 -->
+
+
+      <!-- Row 2: BeamformingViewer (replaces interference + IFFT cards) -->
+      <!--
+        [initialConfig]  – seeds the viewer's internal arrayConfig from
+                           the shared state managed here.
+        (configChange)   – fires when the viewer's probe array is edited,
+                           keeping both components in sync.
+        (beamResult)     – updates the metrics strip below.
+      -->
+      <div class="viewport-row viewer-row">
+        <app-beamforming-viewer
+          class="mode-beamforming-viewer"
+          [initialConfig]="arrayConfig"
+          (configChange)="onViewerConfigChange($event)"
+          (beamResultChange)="onBeamResult($event)"
+        ></app-beamforming-viewer>
+      </div>
+
+
+      <!-- ── METRICS STRIP ───────────────────────────────────────── -->
+      <div class="metrics-panel" *ngIf="beamResult">
+
+        <div class="metric-card">
+          <div class="metric-icon blue">∠</div>
+          <div class="metric-body">
+            <div class="metric-label">Beam Angle</div>
+            <div class="metric-value">{{ beamResult.beamAngle | number:'1.1-1' }}°</div>
+          </div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-icon amber">◈</div>
+          <div class="metric-body">
+            <div class="metric-label">Main Lobe</div>
+            <div class="metric-value">{{ beamResult.mainLobeWidth | number:'1.2-2' }}°</div>
+          </div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-icon red">⊟</div>
+          <div class="metric-body">
+            <div class="metric-label">Side Lobe</div>
+            <div class="metric-value">{{ beamResult.sideLobeLevel | number:'1.1-1' }} dB</div>
+          </div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-icon green">♦</div>
+          <div class="metric-body">
+            <div class="metric-label">Elements</div>
+            <div class="metric-value">{{ arrayConfig.numElements }}</div>
+          </div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-icon blue">≋</div>
+          <div class="metric-body">
+            <div class="metric-label">Geometry</div>
+            <div class="metric-value">{{ arrayConfig.geometry }}</div>
+          </div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-icon amber">⇥</div>
+          <div class="metric-body">
+            <div class="metric-label">Steering</div>
+            <div class="metric-value">{{ arrayConfig.steeringAngle | number:'1.1-1' }}°</div>
+          </div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-icon green">⊙</div>
+          <div class="metric-body">
+            <div class="metric-label">Focus depth</div>
+            <div class="metric-value">{{ arrayConfig.focusDepth }} mm</div>
+          </div>
+        </div>
+
+      </div><!-- /metrics-panel -->
+
+      <!-- Empty metrics hint -->
+      <div class="empty-hint" *ngIf="!beamResult">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M3 12h4l3-9 4 18 3-9h4" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span>Click "Recompute" in the Beamforming Viewer to run the FFT/IFFT pipeline</span>
+      </div>
+
+    </main><!-- /mode-main -->
+
+  </div><!-- /mode-body -->
+
+</div><!-- /mode-layout -->

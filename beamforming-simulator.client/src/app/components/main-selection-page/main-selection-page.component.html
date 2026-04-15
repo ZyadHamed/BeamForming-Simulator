@@ -1,0 +1,91 @@
+<!-- ════════════════════════════════════════════════════════════════
+     MainSelectionPageComponent template
+     ════════════════════════════════════════════════════════════════ -->
+<div class="app-shell">
+
+  <!-- ══ TOP BAR ════════════════════════════════════════════════ -->
+  <header class="topbar">
+
+    <!-- Brand -->
+    <a class="brand" href="#">
+      <svg class="brand-icon" viewBox="0 0 28 28" fill="none">
+        <rect width="28" height="28" rx="7" fill="#1a73e8"/>
+        <path d="M7 21 Q7 7 14 7 Q21 7 21 21" stroke="white" stroke-width="2" fill="none" stroke-linecap="round"/>
+        <path d="M10 21 Q10 12 14 12 Q18 12 18 21" stroke="white" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+        <circle cx="14" cy="21" r="1.5" fill="white"/>
+      </svg>
+      <span class="brand-name">BeamSim</span>
+    </a>
+
+    <div class="topbar-sep"></div>
+    <span class="mode-label">Mode</span>
+
+    <!-- ── Mode selector tabs ──────────────────────────────────── -->
+    <div class="mode-tabs">
+      <button
+        *ngFor="let m of modes"
+        class="mode-tab"
+        [class.active]="activeMode === m.id"
+        [style.--tab-accent]="m.accent"
+        (click)="setMode(m.id)"
+      >
+        <span class="mode-tab-icon" [innerHTML]="m.icon"></span>
+        {{ m.label }}
+      </button>
+    </div>
+
+    <!-- ── Mode dropdown (compact fallback) ───────────────────── -->
+    <div class="mode-dropdown-wrap">
+      <select class="mode-dropdown" [value]="activeMode" (change)="setMode($any($event.target).value)">
+        <option *ngFor="let m of modes" [value]="m.id">{{ m.label }}</option>
+      </select>
+    </div>
+
+    <div class="topbar-sep"></div>
+
+    <!-- Right section -->
+    <div class="topbar-right">
+      <!-- Mode description badge -->
+      <div class="mode-desc-badge" [style.--accent]="activeOption.accent">
+        <span class="mode-desc-dot" [style.background]="activeOption.accent"></span>
+        <span class="mode-desc-text">{{ activeOption.description }}</span>
+      </div>
+
+      <!-- Status indicator -->
+      <div class="status-indicator">
+        <div class="status-dot"></div>
+        <span>Live</span>
+      </div>
+
+      <!-- Info button -->
+      <button class="icon-btn" title="About BeamSim">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6">
+          <circle cx="8" cy="8" r="6"/>
+          <path d="M8 7v5M8 5.5v-.5" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </div>
+
+  </header>
+
+  <!-- ══ MAIN CONTENT ═══════════════════════════════════════════ -->
+  <main class="main-content">
+
+    <!-- Mode: Ultrasound -->
+    <app-mode-ultrasound
+      *ngIf="activeMode === 'ultrasound'"
+    ></app-mode-ultrasound>
+
+    <!-- Mode: 5G -->
+    <app-mode-5g
+      *ngIf="activeMode === '5g'"
+    ></app-mode-5g>
+
+    <!-- Mode: Radar -->
+    <app-mode-radar
+      *ngIf="activeMode === 'radar'"
+    ></app-mode-radar>
+
+  </main>
+
+</div>

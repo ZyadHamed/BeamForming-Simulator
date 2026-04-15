@@ -1,0 +1,252 @@
+<!-- ════════════════════════════════════════════════════════════════
+     BeamformingViewerComponent
+     Three-panel live viewer:
+       1. Probe Array panel  – uses <app-probe-array>
+       2. Interference map   – 2-D canvas heatmap (FFT-driven, backend placeholder)
+       3. Beam profile       – polar / Cartesian amplitude plot
+     ════════════════════════════════════════════════════════════════ -->
+<div class="bfv-root">
+
+  <!-- ══ TOP TOOLBAR ═══════════════════════════════════════════════ -->
+  <header class="bfv-toolbar">
+    <div class="bfv-toolbar__brand">
+      <div class="bfv-toolbar__icon">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+          <circle cx="10" cy="18" r="1.5" fill="currentColor"/>
+          <path d="M4 18 C4 10 16 10 16 18" stroke-linecap="round"/>
+          <path d="M1 18 C1 6  19 6  19 18" stroke-linecap="round"/>
+          <path d="M7 18 C7 13 13 13 13 18" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <span class="bfv-toolbar__title">Beamforming Viewer</span>
+      <span class="bfv-toolbar__badge">LIVE</span>
+    </div>
+
+    <!-- Global controls -->
+    <div class="bfv-toolbar__controls">
+
+      <!-- SNR -->
+      <div class="bfv-ctrl-group">
+        <label class="bfv-ctrl-label">
+          SNR
+          <span class="bfv-ctrl-val">{{ globalConfig.snr | number:'1.0-0' }}</span>
+        </label>
+        <input type="range" class="bfv-slider"
+          min="0" max="1000" step="1"
+          [(ngModel)]="globalConfig.snr"
+          (ngModelChange)="onGlobalChange()"
+        />
+      </div>
+
+      <!-- Apodization window -->
+      <div class="bfv-ctrl-group bfv-ctrl-group--select">
+        <label class="bfv-ctrl-label">Window</label>
+        <select class="bfv-select"
+          [(ngModel)]="globalConfig.apodizationWindow"
+          (ngModelChange)="onGlobalChange()"
+        >
+          <option value="none">None (Rect)</option>
+          <option value="hanning">Hanning</option>
+          <option value="hamming">Hamming</option>
+          <option value="blackman">Blackman</option>
+          <option value="kaiser">Kaiser</option>
+          <option value="tukey">Tukey</option>
+        </select>
+      </div>
+
+      <!-- Kaiser β (only when Kaiser selected) -->
+      <div class="bfv-ctrl-group" *ngIf="globalConfig.apodizationWindow === 'kaiser'">
+        <label class="bfv-ctrl-label">
+          β <span class="bfv-ctrl-val">{{ globalConfig.kaiserBeta | number:'1.1-1' }}</span>
+        </label>
+        <input type="range" class="bfv-slider"
+          min="0" max="14" step="0.5"
+          [(ngModel)]="globalConfig.kaiserBeta"
+          (ngModelChange)="onGlobalChange()"
+        />
+      </div>
+
+      <!-- Tukey α (only when Tukey selected) -->
+      <div class="bfv-ctrl-group" *ngIf="globalConfig.apodizationWindow === 'tukey'">
+        <label class="bfv-ctrl-label">
+          α <span class="bfv-ctrl-val">{{ globalConfig.tukeyAlpha | number:'1.2-2' }}</span>
+        </label>
+        <input type="range" class="bfv-slider"
+          min="0" max="1" step="0.05"
+          [(ngModel)]="globalConfig.tukeyAlpha"
+          (ngModelChange)="onGlobalChange()"
+        />
+      </div>
+
+      <!-- View mode toggle -->
+      <div class="bfv-view-toggle">
+        <button class="bfv-view-btn"
+          [class.active]="beamProfileMode === 'polar'"
+          (click)="beamProfileMode = 'polar'; redrawAll()"
+          title="Polar beam profile">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="8" cy="8" r="6"/>
+            <path d="M8 2v6l4 2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <button class="bfv-view-btn"
+          [class.active]="beamProfileMode === 'cartesian'"
+          (click)="beamProfileMode = 'cartesian'; redrawAll()"
+          title="Cartesian beam profile">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M2 14V2M2 14h12" stroke-linecap="round"/>
+            <path d="M2 10 C5 10 5 4 8 4 C11 4 11 10 14 10" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Recompute -->
+      <button class="bfv-compute-btn" [class.computing]="computing" (click)="triggerCompute()">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6">
+          <path d="M13 8A5 5 0 1 1 8 3" stroke-linecap="round"/>
+          <path d="M8 1v4l2-2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        {{ computing ? 'Computing…' : 'Recompute' }}
+      </button>
+
+    </div>
+  </header>
+
+  <!-- ══ THREE-PANEL BODY ══════════════════════════════════════════ -->
+  <div class="bfv-panels">
+
+    <!-- ── PANEL 1: Probe Array ────────────────────────────────── -->
+    <section class="bfv-panel bfv-panel--probe">
+      <div class="bfv-panel__header">
+        <div class="bfv-panel__pill">1</div>
+        <span class="bfv-panel__title">Probe Array</span>
+        <span class="bfv-panel__subtitle">Elements · Geometry · Beam</span>
+      </div>
+      <div class="bfv-panel__body bfv-panel__body--probe">
+        <app-probe-array
+          [arrayConfig]="arrayConfig"
+          [label]="'Phased Array'"
+          [showBeamResult]="true"
+          (configChange)="onArrayConfigChange($event)"
+          (beamResult)="onBeamResult($event)"
+        ></app-probe-array>
+      </div>
+    </section>
+
+    <!-- ── PANEL 2: Interference Map ──────────────────────────── -->
+    <section class="bfv-panel bfv-panel--interference">
+      <div class="bfv-panel__header">
+        <div class="bfv-panel__pill">2</div>
+        <span class="bfv-panel__title">Interference Map</span>
+        <span class="bfv-panel__subtitle">Constructive / Destructive field</span>
+        <div class="bfv-panel__tag" *ngIf="backendPending">
+          <svg viewBox="0 0 10 10" fill="currentColor"><circle cx="5" cy="5" r="4"/></svg>
+          backend
+        </div>
+      </div>
+
+      <!-- Map controls -->
+      <div class="bfv-map-controls">
+        <div class="bfv-ctrl-inline">
+          <label class="bfv-ctrl-label">Resolution</label>
+          <select class="bfv-select bfv-select--sm"
+            [(ngModel)]="mapResolution"
+            (ngModelChange)="scheduleRedraw()">
+            <option value="64">64</option>
+            <option value="128">128</option>
+            <option value="256">256</option>
+          </select>
+        </div>
+        <div class="bfv-ctrl-inline">
+          <label class="bfv-ctrl-label">Scale</label>
+          <select class="bfv-select bfv-select--sm"
+            [(ngModel)]="mapColorScale"
+            (ngModelChange)="redrawInterference()">
+            <option value="linear">Linear</option>
+            <option value="dB">dB</option>
+          </select>
+        </div>
+        <div class="bfv-ctrl-inline">
+          <label class="bfv-ctrl-label">Depth mm</label>
+          <span class="bfv-ctrl-val">{{ mapDepthMm }}</span>
+          <input type="range" class="bfv-slider bfv-slider--sm"
+            min="20" max="300" step="10"
+            [(ngModel)]="mapDepthMm"
+            (ngModelChange)="scheduleRedraw()"
+          />
+        </div>
+      </div>
+
+      <div class="bfv-panel__body bfv-panel__body--canvas">
+        <canvas #interferenceCanvas class="bfv-canvas bfv-canvas--interference"></canvas>
+
+        <!-- Colorbar -->
+        <div class="bfv-colorbar">
+          <canvas #colorbarCanvas class="bfv-colorbar__canvas"></canvas>
+          <div class="bfv-colorbar__labels">
+            <span>{{ mapColorScale === 'dB' ? '0 dB' : '1.0' }}</span>
+            <span>{{ mapColorScale === 'dB' ? '-40 dB' : '0.0' }}</span>
+          </div>
+        </div>
+
+        <!-- Overlay crosshair coords -->
+        <div class="bfv-crosshair-info" *ngIf="hoverCoords">
+          x: {{ hoverCoords.x | number:'1.0-0' }} mm &nbsp;|&nbsp;
+          z: {{ hoverCoords.z | number:'1.0-0' }} mm &nbsp;|&nbsp;
+          A: {{ hoverCoords.amp | number:'1.2-2' }}
+        </div>
+      </div>
+    </section>
+
+    <!-- ── PANEL 3: Beam Profile ───────────────────────────────── -->
+    <section class="bfv-panel bfv-panel--beam">
+      <div class="bfv-panel__header">
+        <div class="bfv-panel__pill">3</div>
+        <span class="bfv-panel__title">Beam Profile</span>
+        <span class="bfv-panel__subtitle">
+          {{ beamProfileMode === 'polar' ? 'Polar pattern' : 'Amplitude vs angle' }}
+        </span>
+      </div>
+
+      <div class="bfv-panel__body bfv-panel__body--canvas">
+        <canvas #beamProfileCanvas class="bfv-canvas bfv-canvas--beam"></canvas>
+
+        <!-- Metrics strip -->
+        <div class="bfv-metrics" *ngIf="latestResult">
+          <div class="bfv-metric">
+            <div class="bfv-metric__label">Beam angle</div>
+            <div class="bfv-metric__val">{{ latestResult.beamAngle | number:'1.1-1' }}°</div>
+          </div>
+          <div class="bfv-metric">
+            <div class="bfv-metric__label">-3 dB width</div>
+            <div class="bfv-metric__val">{{ latestResult.mainLobeWidth | number:'1.1-2' }}°</div>
+          </div>
+          <div class="bfv-metric">
+            <div class="bfv-metric__label">Side lobe</div>
+            <div class="bfv-metric__val">{{ latestResult.sideLobeLevel | number:'1.1-1' }} dB</div>
+          </div>
+          <div class="bfv-metric">
+            <div class="bfv-metric__label">SNR applied</div>
+            <div class="bfv-metric__val">{{ globalConfig.snr | number:'1.0-0' }}</div>
+          </div>
+          <div class="bfv-metric">
+            <div class="bfv-metric__label">Window</div>
+            <div class="bfv-metric__val">{{ globalConfig.apodizationWindow }}</div>
+          </div>
+        </div>
+
+        <!-- Time-domain strip -->
+        <div class="bfv-td-strip" *ngIf="latestResult">
+          <div class="bfv-td-strip__label">
+            Combined time-domain (IFFT)
+            <span class="bfv-backend-note">← backend IFFT</span>
+          </div>
+          <canvas #timeDomainCanvas class="bfv-td-canvas"></canvas>
+        </div>
+
+      </div>
+    </section>
+
+  </div><!-- /bfv-panels -->
+
+</div><!-- /bfv-root -->

@@ -1,0 +1,244 @@
+/* ══════════════════════════════════════════════════════════════════
+   MainSelectionPageComponent styles
+   (top-bar + shell; inner mode styles live in their own files)
+   ══════════════════════════════════════════════════════════════════ */
+
+:host {
+  display : block;
+  height  : 100vh;
+  overflow: hidden;
+}
+
+/* ── App shell ───────────────────────────────────────────────────── */
+.app-shell {
+  display       : flex;
+  flex-direction: column;
+  height        : 100vh;
+  width         : 100vw;
+  overflow      : hidden;
+}
+
+/* ══ TOP BAR ════════════════════════════════════════════════════════ */
+.topbar {
+  display    : flex;
+  align-items: center;
+  gap        : 10px;
+  height     : var(--topbar-h);
+  padding    : 0 16px;
+  background : var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  box-shadow : var(--shadow-md);
+  flex-shrink: 0;
+  z-index    : 100;
+}
+
+/* Brand */
+.brand {
+  display    : flex;
+  align-items: center;
+  gap        : 8px;
+  margin-right: 4px;
+  user-select: none;
+  text-decoration: none;
+}
+
+.brand-icon {
+  width     : 28px;
+  height    : 28px;
+  flex-shrink: 0;
+}
+
+.brand-name {
+  font-size  : 15px;
+  font-weight: 800;
+  color      : var(--text-primary);
+  letter-spacing: -0.03em;
+}
+
+/* Separator */
+.topbar-sep {
+  width     : 1px;
+  height    : 22px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+/* Mode label */
+.mode-label {
+  font-size    : 10px;
+  font-weight  : 700;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color        : var(--text-muted);
+  white-space  : nowrap;
+}
+
+/* ── Mode tabs ──────────────────────────────────────────────────── */
+.mode-tabs {
+  display      : flex;
+  background   : var(--bg-app);
+  border       : 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding      : 3px;
+  gap          : 2px;
+}
+
+.mode-tab {
+  display    : flex;
+  align-items: center;
+  gap        : 6px;
+  padding    : 5px 14px;
+  border     : none;
+  border-radius: 7px;
+  background : transparent;
+  color      : var(--text-muted);
+  font-family: var(--font-ui);
+  font-size  : 12px;
+  font-weight: 500;
+  cursor     : pointer;
+  transition : all 140ms;
+  white-space: nowrap;
+}
+
+.mode-tab-icon {
+  display    : flex;
+  align-items: center;
+  width      : 14px;
+  height     : 14px;
+  flex-shrink: 0;
+}
+
+.mode-tab-icon ::ng-deep svg {
+  width : 14px;
+  height: 14px;
+}
+
+.mode-tab:hover:not(.active) {
+  background: var(--bg-surface);
+  color     : var(--text-primary);
+}
+
+.mode-tab.active {
+  background: var(--bg-surface);
+  color     : var(--tab-accent, var(--accent-blue));
+  box-shadow: var(--shadow-sm);
+  font-weight: 700;
+}
+
+/* ── Mode dropdown (hidden on wide screens) ─────────────────────── */
+.mode-dropdown-wrap { display: none; }
+
+.mode-dropdown {
+  appearance   : none;
+  background   : var(--bg-surface)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%237a8fa6'/%3E%3C/svg%3E")
+    no-repeat right 9px center;
+  border       : 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding      : 6px 28px 6px 10px;
+  color        : var(--text-primary);
+  font-family  : var(--font-ui);
+  font-size    : 12px;
+  cursor       : pointer;
+}
+
+/* ── Right section ──────────────────────────────────────────────── */
+.topbar-right {
+  display    : flex;
+  align-items: center;
+  gap        : 10px;
+  margin-left: auto;
+}
+
+.mode-desc-badge {
+  display    : flex;
+  align-items: center;
+  gap        : 6px;
+  background : var(--bg-app);
+  border     : 1px solid var(--border);
+  border-radius: 20px;
+  padding    : 4px 10px;
+  max-width  : 340px;
+  overflow   : hidden;
+}
+
+.mode-desc-dot {
+  width       : 6px;
+  height      : 6px;
+  border-radius: 50%;
+  flex-shrink : 0;
+}
+
+.mode-desc-text {
+  font-size  : 10px;
+  color      : var(--text-muted);
+  white-space: nowrap;
+  overflow   : hidden;
+  text-overflow: ellipsis;
+}
+
+.status-indicator {
+  display    : flex;
+  align-items: center;
+  gap        : 6px;
+  font-size  : 11px;
+  font-family: var(--font-mono);
+  color      : var(--accent-green);
+  font-weight: 500;
+}
+
+.status-dot {
+  width       : 7px;
+  height      : 7px;
+  border-radius: 50%;
+  background  : var(--accent-green);
+  box-shadow  : 0 0 5px rgba(52,168,83,0.5);
+  animation   : status-pulse 2.5s ease-in-out infinite;
+}
+
+@keyframes status-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.35; }
+}
+
+.icon-btn {
+  display    : flex;
+  align-items: center;
+  justify-content: center;
+  width      : 30px;
+  height     : 30px;
+  border     : 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background : var(--bg-surface);
+  color      : var(--text-muted);
+  cursor     : pointer;
+  transition : all 140ms;
+}
+
+.icon-btn svg { width: 14px; height: 14px; }
+
+.icon-btn:hover {
+  border-color: var(--accent-blue);
+  color       : var(--accent-blue);
+  background  : var(--bg-hover);
+}
+
+/* ── Main content ────────────────────────────────────────────────── */
+.main-content {
+  flex    : 1;
+  overflow: hidden;
+  display : flex;
+  position: relative;
+}
+
+.main-content > * {
+  width : 100%;
+  height: 100%;
+}
+
+/* ── Responsive: narrow screens ─────────────────────────────────── */
+@media (max-width: 860px) {
+  .mode-tabs       { display: none; }
+  .mode-dropdown-wrap { display: block; }
+  .mode-desc-badge { display: none; }
+}
