@@ -5,39 +5,72 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { Injectable } from '@angular/core';
-import { HttpClient }  from '@angular/common/http';
+import { HttpClient } from '@angular/common/http';
 import { Observable, of, delay } from 'rxjs';
 import {
   ProbeElementConfig,
   ArrayConfig,
   BeamformingResult,
-  SimMode,  
+  SimMode,
   InterferenceFieldResult,
   BeamProfileResult,
 } from '../models/beamforming.models';
 
 export interface FftRequest {
-  signal      : number[];
-  sampleRate  : number;   // Hz
+  signal: number[];
+  sampleRate: number;   // Hz
 }
 
 export interface FftResponse {
-  re          : number[];
-  im          : number[];
-  frequencies : number[];
-  magnitude   : number[];
-  phase       : number[];
+  re: number[];
+  im: number[];
+  frequencies: number[];
+  magnitude: number[];
+  phase: number[];
 }
 
 export interface BeamformRequest {
-  mode        : SimMode;
-  arrayConfig : ArrayConfig;
-  snr ?: number;
-  window ?: ArrayConfig["apodizationWindow"]
-  targetAngle ?: number;
-  targetX     ?: number;
-  targetY     ?: number;
-  sampleRate  ?: number;
+  mode: SimMode;
+  arrayConfig: ArrayConfig;
+  snr?: number;
+  window?: ArrayConfig["apodizationWindow"]
+  targetAngle?: number;
+  targetX?: number;
+  targetY?: number;
+  sampleRate?: number;
+}
+
+// ── 5G Interfaces ──────────────────────────────────────────────────
+export interface Tower5GRequest {
+  tower_id: string;
+  x_m: number;
+  y_m: number;
+  num_elements: number;
+  element_spacing_mm: number;
+  max_coverage_radius_m: number;
+}
+
+export interface User5GRequest {
+  user_id: string;
+  x_m: number;
+  y_m: number;
+  allocated_frequency_mhz: number;
+}
+
+export interface LinkQuality {
+  user_id: string;
+  tower_id: string;
+  sector_name: string;
+  global_angle_deg: number;
+  local_beam_angle_deg: number;
+  snr_db: number;
+  data_rate_mbps: number;
+}
+
+export interface NetworkStateResult {
+  timestamp: number;
+  active_connections: LinkQuality[];
+  dropped_users: string[];
 }
 
 // ── Environment switch ─────────────────────────────────────────────
@@ -47,7 +80,7 @@ const API_BASE = '/api'; // ← configure to match your backend
 @Injectable({ providedIn: 'root' })
 export class BeamformingService {
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient) { }
 
   // ── Public API methods ─────────────────────────────────────────
 
@@ -69,56 +102,79 @@ export class BeamformingService {
     return this.http.post<BeamformingResult>(`${API_BASE}/beamform`, req);
   }
 
+  /**
+   * BACKEND PLACEHOLDER
+   * POST /api/beamforming/interference-field
+   */
+  computeInterferenceField(params: {
+    arrayConfig: ArrayConfig;
+    snr: number;
+    apodizationWindow: string;
+    kaiserBeta: number;
+    tukeyAlpha: number;
+    cols: number;
+    rows: number;
+    depthMm: number;
+  }): Observable<InterferenceFieldResult> {
+    // TODO: return this.http.post<InterferenceFieldResult>(
+    //   '/api/beamforming/interference-field', params
+    // );
+    return of(null as any);
+  }
 
-  // ADD after computeBeamforming():
-
-/**
- * BACKEND PLACEHOLDER
- * POST /api/beamforming/interference-field
- */
-computeInterferenceField(params: {
-  arrayConfig       : ArrayConfig;
-  snr               : number;
-  apodizationWindow : string;
-  kaiserBeta        : number;
-  tukeyAlpha        : number;
-  cols              : number;
-  rows              : number;
-  depthMm           : number;
-}): Observable<InterferenceFieldResult> {
-  // TODO: return this.http.post<InterferenceFieldResult>(
-  //   '/api/beamforming/interference-field', params
-  // );
-  return of(null as any);
-}
-
-/**
- * BACKEND PLACEHOLDER
- * POST /api/beamforming/beam-profile
- */
-computeBeamProfile(params: {
-  arrayConfig       : ArrayConfig;
-  snr               : number;
-  apodizationWindow : string;
-  kaiserBeta        : number;
-  tukeyAlpha        : number;
-}): Observable<BeamProfileResult> {
-  // TODO: return this.http.post<BeamProfileResult>(
-  //   '/api/beamforming/beam-profile', params
-  // );
-  return of(null as any);
-}
+  /**
+   * BACKEND PLACEHOLDER
+   * POST /api/beamforming/beam-profile
+   */
+  computeBeamProfile(params: {
+    arrayConfig: ArrayConfig;
+    snr: number;
+    apodizationWindow: string;
+    kaiserBeta: number;
+    tukeyAlpha: number;
+  }): Observable<BeamProfileResult> {
+    // TODO: return this.http.post<BeamProfileResult>(
+    //   '/api/beamforming/beam-profile', params
+    // );
+    return of(null as any);
+  }
 
   /** Compute element delays for a target steering angle (backend). */
   computeSteeringDelays(
-    arrayConfig : ArrayConfig,
+    arrayConfig: ArrayConfig,
     targetAngleDeg: number,
-    speedMs     : number = 1540,
+    speedMs: number = 1540,
   ): Observable<number[]> {
     if (USE_MOCK) return of(this._mockSteeringDelays(arrayConfig, targetAngleDeg, speedMs)).pipe(delay(20));
     return this.http.post<number[]>(`${API_BASE}/steering-delays`, {
       arrayConfig, targetAngleDeg, speedMs,
     });
+  }
+
+  // ── 5G API methods ─────────────────────────────────────────────
+
+  /**
+   * Initialize or replace towers on the backend.
+   * Call once on load, or whenever tower count / parameters change.
+   * POST /5g-scenario/towers
+   */
+  initTowers(towers: Tower5GRequest[]): Observable<{ message: string }> {
+    return this.http.post<{ message: string }>(
+      `${API_BASE}/5g-scenario/towers`,
+      { towers },
+    );
+  }
+
+  /**
+   * Push updated user positions and receive live link calculations.
+   * Call this every animation frame (or on movement).
+   * POST /5g-scenario/update-users
+   */
+  updateUsers(users: User5GRequest[]): Observable<NetworkStateResult> {
+    return this.http.post<NetworkStateResult>(
+      `${API_BASE}/5g-scenario/update-users`,
+      { users },
+    );
   }
 
   // ── Mock implementations ───────────────────────────────────────
@@ -139,7 +195,7 @@ computeBeamProfile(params: {
       re[k] /= N; im[k] /= N;
     }
     const magnitude = re.map((r, i) => Math.sqrt(r * r + im[i] ** 2));
-    const phase     = re.map((r, i) => Math.atan2(im[i], r));
+    const phase = re.map((r, i) => Math.atan2(im[i], r));
     const frequencies = Array.from({ length: N }, (_, i) =>
       (i * req.sampleRate) / N);
     return { re, im, frequencies, magnitude, phase };
@@ -159,7 +215,7 @@ computeBeamProfile(params: {
 
   private _mockBeamforming(req: BeamformRequest): BeamformingResult {
     const { arrayConfig, targetAngle = 0 } = req;
-    const N   = 64;
+    const N = 64;
     const ang = (targetAngle * Math.PI) / 180;
 
     const elementSpectra = arrayConfig.elements.map((el, idx) => {
@@ -185,19 +241,19 @@ computeBeamProfile(params: {
       elementSpectra,
       combinedSpectrum: combined,
       timeDomain,
-      beamAngle      : targetAngle,
-      sideLobeLevel  : -13.2 + Math.random() * 2,
-      mainLobeWidth  : 6.4 / arrayConfig.numElements,
+      beamAngle: targetAngle,
+      sideLobeLevel: -13.2 + Math.random() * 2,
+      mainLobeWidth: 6.4 / arrayConfig.numElements,
     };
   }
 
   private _mockSteeringDelays(
-    cfg           : ArrayConfig,
+    cfg: ArrayConfig,
     targetAngleDeg: number,
-    speedMs       : number,
+    speedMs: number,
   ): number[] {
     const angleRad = (targetAngleDeg * Math.PI) / 180;
-    const d        = cfg.elementSpacing * 1e-3; // mm → m
+    const d = cfg.elementSpacing * 1e-3; // mm → m
     return cfg.elements.map((_, i) => {
       const offset = (i - (cfg.numElements - 1) / 2) * d;
       return (offset * Math.sin(angleRad)) / speedMs * 1e6; // µs
@@ -206,12 +262,12 @@ computeBeamProfile(params: {
 
   // ── Utility: generate a mock sine-burst signal ─────────────────
   generateSineBurst(
-    freqMhz    : number,
-    numCycles  : number = 3,
-    sampleRate : number = 1e8,
-    amplitude  : number = 1,
+    freqMhz: number,
+    numCycles: number = 3,
+    sampleRate: number = 1e8,
+    amplitude: number = 1,
   ): number[] {
-    const period  = 1 / (freqMhz * 1e6);
+    const period = 1 / (freqMhz * 1e6);
     const nSamples = Math.round(numCycles * period * sampleRate);
     return Array.from({ length: nSamples }, (_, i) => {
       const t = i / sampleRate;

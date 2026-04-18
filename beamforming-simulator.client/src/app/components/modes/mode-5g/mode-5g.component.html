@@ -8,44 +8,27 @@
 
     <!-- Toolbar -->
     <div class="sidebar-toolbar">
-      <button
-        class="tool-btn"
-        [class.active]="placingMode === 'tower'"
-        (click)="startPlacing('tower')"
-        title="Place base station"
-      >
+      <button class="tool-btn" [class.active]="placingMode==='tower'" (click)="startPlacing('tower')" title="Place base station">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6">
-          <path d="M8 2v10M4 6h8M5 4h6" stroke-linecap="round"/>
-          <path d="M6 12h4v2H6z"/>
-        </svg>
-        Add Tower
+          <path d="M8 2v10M4 6h8M5 4h6" stroke-linecap="round" />
+          <path d="M6 12h4v2H6z" />
+        </svg>Add Tower
       </button>
-      <button
-        class="tool-btn"
-        [class.active]="placingMode === 'user'"
-        (click)="startPlacing('user')"
-        title="Place mobile user"
-      >
+      <button class="tool-btn" [class.active]="placingMode==='user'" (click)="startPlacing('user')" title="Place mobile user">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6">
-          <circle cx="8" cy="5" r="2.5"/>
-          <path d="M3 14c0-3 2-5 5-5s5 2 5 5" stroke-linecap="round"/>
-        </svg>
-        Add UE
+          <circle cx="8" cy="5" r="2.5" />
+          <path d="M3 14c0-3 2-5 5-5s5 2 5 5" stroke-linecap="round" />
+        </svg>Add UE
       </button>
-      <label class="toggle-label">
-        <input type="checkbox" [(ngModel)]="showCoverage" />
-        Coverage
-      </label>
-      <label class="toggle-label">
-  <input type="checkbox" [(ngModel)]="showGlobalInterference" />
-  Field overlay
-</label>
+      <label class="toggle-label"><input type="checkbox" [(ngModel)]="showCoverage" />Coverage</label>
+      <label class="toggle-label"><input type="checkbox" [(ngModel)]="showGlobalInterference" />Field overlay</label>
     </div>
 
-    <!-- Status: placing hint -->
+    <!-- Placing hint -->
     <div class="placing-hint" *ngIf="placingMode">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-        <circle cx="8" cy="8" r="5"/><path d="M8 5v6M5 8h6" stroke-linecap="round"/>
+        <circle cx="8" cy="8" r="5" />
+        <path d="M8 5v6M5 8h6" stroke-linecap="round" />
       </svg>
       Click on the map to place a {{ placingMode === 'tower' ? 'base station' : 'mobile user' }}
     </div>
@@ -54,16 +37,13 @@
     <div class="entity-section">
       <div class="section-label">Base Stations ({{ towers.length }})</div>
       <div class="entity-list">
-        <div
-          class="entity-row"
-          *ngFor="let t of towers"
-          [class.selected]="t.id === selectedTowerId"
-          (click)="selectedTowerId = t.id; selectedUserId = null"
-        >
+        <div class="entity-row" *ngFor="let t of towers"
+             [class.selected]="t.id===selectedTowerId"
+             (click)="selectedTowerId=t.id; selectedUserId=null; redrawPolar()">
           <div class="entity-dot" [style.background]="t.color"></div>
-          <span class="entity-name">BS{{ towers.indexOf(t) + 1 }}</span>
+          <span class="entity-name">BS{{ towers.indexOf(t)+1 }}</span>
           <span class="entity-meta">{{ users | userCount:t.id }} UE</span>
-          <button class="rm-btn" (click)="removeTower(t.id); $event.stopPropagation()">✕</button>
+          <button class="rm-btn" (click)="removeTower(t.id);$event.stopPropagation()">✕</button>
         </div>
         <div class="entity-empty" *ngIf="!towers.length">No towers placed</div>
       </div>
@@ -73,71 +53,117 @@
     <div class="entity-section">
       <div class="section-label">Mobile Users ({{ users.length }})</div>
       <div class="entity-list">
-        <div
-          class="entity-row"
-          *ngFor="let u of users"
-          [class.selected]="u.id === selectedUserId"
-          (click)="selectedUserId = u.id; selectedTowerId = null"
-        >
+        <div class="entity-row" *ngFor="let u of users"
+             [class.selected]="u.id===selectedUserId"
+             (click)="selectedUserId=u.id; selectedTowerId=null">
           <div class="entity-dot" [style.background]="u.color"></div>
           <span class="entity-name">{{ u.label }}</span>
           <span class="entity-meta connected" *ngIf="u.connectedTowerId">●</span>
           <span class="entity-meta" *ngIf="!u.connectedTowerId">OOR</span>
-          <button class="rm-btn" (click)="removeUser(u.id); $event.stopPropagation()">✕</button>
+          <button class="rm-btn" (click)="removeUser(u.id);$event.stopPropagation()">✕</button>
         </div>
         <div class="entity-empty" *ngIf="!users.length">No users placed</div>
       </div>
     </div>
 
-    <!-- Selected user hint -->
+    <!-- Key hint -->
     <div class="key-hint" *ngIf="selectedUserId">
       <div class="hint-title">Move selected UE</div>
-      <div class="key-row">
-        <kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd>
-      </div>
+      <div class="key-row"><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd></div>
     </div>
 
-    <!-- Selected tower → probe array panel -->
-    <div class="tower-array-panel" *ngIf="selectedTower">
-      <div class="section-label" style="padding:8px 12px 0">
-        Tower {{ towers.indexOf(selectedTower) + 1 }} Array
+    <!-- ── Selected tower controls ────────────────────────────── -->
+    <ng-container *ngIf="selectedTower">
+
+      <!-- Coverage range slider -->
+      <div class="coverage-slider-panel">
+        <div class="section-label" style="padding:8px 12px 4px">
+          BS{{ towers.indexOf(selectedTower)+1 }} Coverage Radius
+        </div>
+        <div class="coverage-slider-wrap">
+          <input type="range" class="coverage-slider"
+                 min="60" max="400" step="5"
+                 [ngModel]="selectedTowerRange"
+                 (ngModelChange)="selectedTowerRange=$event" />
+          <span class="coverage-value">{{ selectedTowerRange }} px</span>
+        </div>
       </div>
-      <div class="tower-array-wrap">
-        <app-probe-array
-          [arrayConfig]="selectedTower.array"
-          [label]="'BS' + (towers.indexOf(selectedTower) + 1) + ' Array'"
-          [showBeamResult]="false"
-          (configChange)="onTowerArrayChange($event)"
-        ></app-probe-array>
+
+      <!-- Probe array -->
+      <div class="tower-array-panel">
+        <div class="section-label" style="padding:8px 12px 0">
+          Tower {{ towers.indexOf(selectedTower)+1 }} Array
+        </div>
+        <div class="tower-array-wrap">
+          <app-probe-array [arrayConfig]="selectedTower.array"
+                           [label]="'BS'+(towers.indexOf(selectedTower)+1)+' Array'"
+                           [showBeamResult]="false"
+                           (configChange)="onTowerArrayChange($event)"></app-probe-array>
+        </div>
       </div>
-    </div>
-<div class="interference-panel" *ngIf="selectedTower">
-  <div class="section-label" style="padding:8px 12px 4px">
-    BS{{ towers.indexOf(selectedTower)+1 }} Interference Field
-  </div>
-  <div class="interference-canvas-wrap">
-    <app-interference-field
-      [elementPositions]="selectedTowerInterference"
-      fieldGeometry="cartesian"
-      [propagationSpeed]="3e8"
-      [tint]="'green'"
-      [resolution]="3"
-    ></app-interference-field>
-  </div>
-</div>
+
+      <!-- Interference field -->
+      <div class="interference-panel">
+        <div class="section-label" style="padding:8px 12px 4px">
+          BS{{ towers.indexOf(selectedTower)+1 }} Interference Field
+        </div>
+        <div class="interference-canvas-wrap">
+          <app-interference-field [elementPositions]="selectedTowerInterference"
+                                  fieldGeometry="cartesian"
+                                  [propagationSpeed]="3e8"
+                                  [tint]="'green'"
+                                  [resolution]="3"></app-interference-field>
+        </div>
+      </div>
+
+      <!-- Sector beam patterns -->
+      <div class="sector-beam-panel">
+        <div class="section-label" style="padding:8px 12px 4px">
+          BS{{ towers.indexOf(selectedTower)+1 }} — Sector Beam Patterns
+        </div>
+        <div class="sector-tabs">
+          <button *ngFor="let s of sectorNames" class="sector-tab"
+                  [class.active]="activeSectorTab===s"
+                  [style.--tab-color]="s==='Alpha'?'#1a73e8':s==='Beta'?'#34a853':'#e8a82b'"
+                  (click)="selectSectorTab(s)">
+            {{ s }}
+          </button>
+        </div>
+        <div class="polar-wrap">
+          <canvas #polarCanvas class="polar-canvas" width="240" height="240"></canvas>
+          <div class="polar-hint">All 3 sectors shown · active sector highlighted</div>
+        </div>
+        <div class="sector-params-wrap">
+          <table class="sector-params-table">
+            <tbody>
+              <tr *ngFor="let p of activeSectorParams">
+                <td class="sp-label">{{ p.label }}</td>
+                <td class="sp-value"
+                    [class.sp-highlight]="p.label==='Steering Angle'||p.label==='Global Pointing'">
+                  {{ p.value }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </ng-container>
+
   </aside>
 
   <!-- ── Main canvas ────────────────────────────────────────────── -->
   <main class="mode-main">
     <div class="env-wrap">
-      <canvas
-        #envCanvas
-        class="env-canvas"
-        [class.placing]="!!placingMode"
-        (click)="onCanvasClick($event)"
-      ></canvas>
-
-      <!-- Overlay labels -->
+      <canvas #envCanvas class="env-canvas"
+              [style.cursor]="canvasCursor"
+              [class.placing]="!!placingMode"
+              (mousedown)="onCanvasMouseDown($event)"
+              (mousemove)="onCanvasMouseMove($event)"
+              (mouseup)="onCanvasMouseUp($event)"
+              (mouseleave)="onCanvasMouseLeave($event)"
+              (click)="onCanvasClick($event)">
+      </canvas>
       <div class="overlay-legend">
         <div class="legend-item" *ngFor="let t of towers">
           <div class="leg-dot" [style.background]="t.color"></div>
@@ -146,4 +172,5 @@
       </div>
     </div>
   </main>
+
 </div>
