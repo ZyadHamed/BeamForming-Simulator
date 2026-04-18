@@ -5,48 +5,47 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { Injectable } from '@angular/core';
-import { HttpClient }  from '@angular/common/http';
+import { HttpClient } from '@angular/common/http';
 import { Observable, of, delay } from 'rxjs';
 import {
   ProbeElementConfig,
   ArrayConfig,
   BeamformingResult,
-  SimMode,  
+  SimMode,
   InterferenceFieldResult,
   BeamProfileResult,
 } from '../models/beamforming.models';
 
 export interface FftRequest {
-  signal      : number[];
-  sampleRate  : number;   // Hz
+  signal: number[];
+  sampleRate: number; // Hz
 }
 
 export interface FftResponse {
-  re          : number[];
-  im          : number[];
-  frequencies : number[];
-  magnitude   : number[];
-  phase       : number[];
+  re: number[];
+  im: number[];
+  frequencies: number[];
+  magnitude: number[];
+  phase: number[];
 }
 
 export interface BeamformRequest {
-  mode        : SimMode;
-  arrayConfig : ArrayConfig;
-  snr ?: number;
-  window ?: ArrayConfig["apodizationWindow"]
-  targetAngle ?: number;
-  targetX     ?: number;
-  targetY     ?: number;
-  sampleRate  ?: number;
+  mode: SimMode;
+  arrayConfig: ArrayConfig;
+  snr?: number;
+  window?: ArrayConfig['apodizationWindow'];
+  targetAngle?: number;
+  targetX?: number;
+  targetY?: number;
+  sampleRate?: number;
 }
 
 // ── Environment switch ─────────────────────────────────────────────
-const USE_MOCK = true;   // ← flip to false once backend is live
-const API_BASE = '/api'; // ← configure to match your backend
+const USE_MOCK = false; // ← flip to false once backend is live
+const API_BASE = ''; // ← configure to match your backend
 
 @Injectable({ providedIn: 'root' })
 export class BeamformingService {
-
   constructor(private http: HttpClient) {}
 
   // ── Public API methods ─────────────────────────────────────────
@@ -69,55 +68,89 @@ export class BeamformingService {
     return this.http.post<BeamformingResult>(`${API_BASE}/beamform`, req);
   }
 
-
   // ADD after computeBeamforming():
 
-/**
- * BACKEND PLACEHOLDER
- * POST /api/beamforming/interference-field
- */
-computeInterferenceField(params: {
-  arrayConfig       : ArrayConfig;
-  snr               : number;
-  apodizationWindow : string;
-  kaiserBeta        : number;
-  tukeyAlpha        : number;
-  cols              : number;
-  rows              : number;
-  depthMm           : number;
-}): Observable<InterferenceFieldResult> {
-  // TODO: return this.http.post<InterferenceFieldResult>(
-  //   '/api/beamforming/interference-field', params
-  // );
-  return of(null as any);
-}
+  /**
+   * BACKEND PLACEHOLDER
+   * POST /api/beamforming/interference-field
+   */
+  computeInterferenceField(params: {
+    arrayConfig: ArrayConfig;
+    snr: number;
+    apodizationWindow: string;
+    kaiserBeta: number;
+    tukeyAlpha: number;
+    cols: number;
+    rows: number;
+    depthMm: number;
+  }): Observable<InterferenceFieldResult> {
+    // TODO: return this.http.post<InterferenceFieldResult>(
+    //   '/api/beamforming/interference-field', params
+    // );
+    return of(null as any);
+  }
 
-/**
- * BACKEND PLACEHOLDER
- * POST /api/beamforming/beam-profile
- */
-computeBeamProfile(params: {
-  arrayConfig       : ArrayConfig;
-  snr               : number;
-  apodizationWindow : string;
-  kaiserBeta        : number;
-  tukeyAlpha        : number;
-}): Observable<BeamProfileResult> {
-  // TODO: return this.http.post<BeamProfileResult>(
-  //   '/api/beamforming/beam-profile', params
-  // );
-  return of(null as any);
-}
+  /**
+   * BACKEND PLACEHOLDER
+   * POST /api/beamforming/beam-profile
+   */
+  computeBeamProfile(params: {
+    arrayConfig: ArrayConfig;
+    snr: number;
+    apodizationWindow: string;
+    kaiserBeta: number;
+    tukeyAlpha: number;
+  }): Observable<BeamProfileResult> {
+    // TODO: return this.http.post<BeamProfileResult>(
+    //   '/api/beamforming/beam-profile', params
+    // );
+    return of(null as any);
+  }
+
+  setupRadar(req: {
+    num_elements: number;
+    element_spacing: number;
+    frequency_mhz: number;
+    geometry: string;
+    curvature_radius: number;
+    snr: number;
+    apodization: string;
+    noise_floor_dbm: number;
+  }): Observable<{ message: string }> {
+    return this.http.post<{ message: string }>(`${API_BASE}/radar/setup`, req);
+  }
+
+  scanRadar(req: {
+    start_angle: number;
+    end_angle: number;
+    num_lines: number;
+    max_range_m: number;
+    targets: {
+      target_id: string;
+      x_m: number;
+      y_m: number;
+      velocity_m_s: number;
+      rcs_sqm: number;
+    }[];
+  }): Observable<{ ppi_image_base64: string; detections: any[] }> {
+    return this.http.post<{ ppi_image_base64: string; detections: any[] }>(
+      `${API_BASE}/radar/scan`,
+      req,
+    );
+  }
 
   /** Compute element delays for a target steering angle (backend). */
   computeSteeringDelays(
-    arrayConfig : ArrayConfig,
+    arrayConfig: ArrayConfig,
     targetAngleDeg: number,
-    speedMs     : number = 1540,
+    speedMs: number = 1540,
   ): Observable<number[]> {
-    if (USE_MOCK) return of(this._mockSteeringDelays(arrayConfig, targetAngleDeg, speedMs)).pipe(delay(20));
+    if (USE_MOCK)
+      return of(this._mockSteeringDelays(arrayConfig, targetAngleDeg, speedMs)).pipe(delay(20));
     return this.http.post<number[]>(`${API_BASE}/steering-delays`, {
-      arrayConfig, targetAngleDeg, speedMs,
+      arrayConfig,
+      targetAngleDeg,
+      speedMs,
     });
   }
 
@@ -136,12 +169,12 @@ computeBeamProfile(params: {
         re[k] += req.signal[n] * Math.cos(angle);
         im[k] -= req.signal[n] * Math.sin(angle);
       }
-      re[k] /= N; im[k] /= N;
+      re[k] /= N;
+      im[k] /= N;
     }
     const magnitude = re.map((r, i) => Math.sqrt(r * r + im[i] ** 2));
-    const phase     = re.map((r, i) => Math.atan2(im[i], r));
-    const frequencies = Array.from({ length: N }, (_, i) =>
-      (i * req.sampleRate) / N);
+    const phase = re.map((r, i) => Math.atan2(im[i], r));
+    const frequencies = Array.from({ length: N }, (_, i) => (i * req.sampleRate) / N);
     return { re, im, frequencies, magnitude, phase };
   }
 
@@ -159,15 +192,19 @@ computeBeamProfile(params: {
 
   private _mockBeamforming(req: BeamformRequest): BeamformingResult {
     const { arrayConfig, targetAngle = 0 } = req;
-    const N   = 64;
+    const N = 64;
     const ang = (targetAngle * Math.PI) / 180;
 
     const elementSpectra = arrayConfig.elements.map((el, idx) => {
       const phaseRad = (el.phaseShift * Math.PI) / 180;
-      const re = Array.from({ length: N }, (_, k) =>
-        (el.intensity / 100) * Math.cos(k * phaseRad + idx * 0.3));
-      const im = Array.from({ length: N }, (_, k) =>
-        -(el.intensity / 100) * Math.sin(k * phaseRad + idx * 0.3));
+      const re = Array.from(
+        { length: N },
+        (_, k) => (el.intensity / 100) * Math.cos(k * phaseRad + idx * 0.3),
+      );
+      const im = Array.from(
+        { length: N },
+        (_, k) => -(el.intensity / 100) * Math.sin(k * phaseRad + idx * 0.3),
+      );
       return { re, im };
     });
 
@@ -185,33 +222,29 @@ computeBeamProfile(params: {
       elementSpectra,
       combinedSpectrum: combined,
       timeDomain,
-      beamAngle      : targetAngle,
-      sideLobeLevel  : -13.2 + Math.random() * 2,
-      mainLobeWidth  : 6.4 / arrayConfig.numElements,
+      beamAngle: targetAngle,
+      sideLobeLevel: -13.2 + Math.random() * 2,
+      mainLobeWidth: 6.4 / arrayConfig.numElements,
     };
   }
 
-  private _mockSteeringDelays(
-    cfg           : ArrayConfig,
-    targetAngleDeg: number,
-    speedMs       : number,
-  ): number[] {
+  private _mockSteeringDelays(cfg: ArrayConfig, targetAngleDeg: number, speedMs: number): number[] {
     const angleRad = (targetAngleDeg * Math.PI) / 180;
-    const d        = cfg.elementSpacing * 1e-3; // mm → m
+    const d = cfg.elementSpacing * 1e-3; // mm → m
     return cfg.elements.map((_, i) => {
       const offset = (i - (cfg.numElements - 1) / 2) * d;
-      return (offset * Math.sin(angleRad)) / speedMs * 1e6; // µs
+      return ((offset * Math.sin(angleRad)) / speedMs) * 1e6; // µs
     });
   }
 
   // ── Utility: generate a mock sine-burst signal ─────────────────
   generateSineBurst(
-    freqMhz    : number,
-    numCycles  : number = 3,
-    sampleRate : number = 1e8,
-    amplitude  : number = 1,
+    freqMhz: number,
+    numCycles: number = 3,
+    sampleRate: number = 1e8,
+    amplitude: number = 1,
   ): number[] {
-    const period  = 1 / (freqMhz * 1e6);
+    const period = 1 / (freqMhz * 1e6);
     const nSamples = Math.round(numCycles * period * sampleRate);
     return Array.from({ length: nSamples }, (_, i) => {
       const t = i / sampleRate;

@@ -16,6 +16,8 @@ from fastapi.middleware.gzip import GZipMiddleware
 from Objects.Scenarios.Telecom5GScenario import Telecom5GScenario, UserEquipment, Tower5G 
 from Objects.ArrayConfig import ArrayConfig, ProbeElement
 
+from Objects.Scenarios.RadarScenario import RadarScenario, RadarScanResult
+from Objects.Physics.RadarEnviroment import RadarEnvironment, RadarTarget as RadarTargetObj
 
 #py -m uvicorn endpoints:app --reload
 
@@ -162,7 +164,106 @@ def update_users_and_evaluate(req: UserUpdateRequest):
     
     return result
 
+# --- Radar State ---
+active_radar: Optional[RadarScenario] = None
 
+# --- Radar DTOs ---
+class RadarSetupRequest(BaseModel):
+    num_elements     : int
+    element_spacing  : float
+    frequency_mhz   : float
+    geometry         : Literal['linear', 'curved', 'phased'] = 'curved'
+    curvature_radius : float = 60.0
+    snr              : float = 60.0
+    apodization      : Literal['none', 'hanning', 'hamming', 'blackman', 'kaiser', 'tukey'] = 'none'
+    noise_floor_dbm  : float = -90.0
+
+class RadarTargetDTO(BaseModel):
+    target_id  : str
+    x_m        : float
+    y_m        : float
+    velocity_m_s: float = 0.0
+    rcs_sqm    : float
+
+class RadarScanRequest(BaseModel):
+    start_angle  : float
+    end_angle    : float
+    num_lines    : int   = 32
+    max_range_m  : float = 100.0
+    targets      : List[RadarTargetDTO]
+
+# --- Radar Endpoint ---
+
+@app.post("/radar/setup")
+def radar_setup(req: RadarSetupRequest):
+    """
+    Call once when radar mode loads or when array config changes.
+    Instantiates the RadarScenario with an empty environment.
+    """
+    global active_radar
+
+    elements = [
+        ProbeElement(
+            element_id=f"el_{i}", label=f"E{i}", color="#ea4335",
+            frequency=req.frequency_mhz, phase_shift=0.0,
+            time_delay=0.0, intensity=100.0, enabled=True
+        ) for i in range(req.num_elements)
+    ]
+    config = ArrayConfig(
+        elements=elements,
+        steering_angle=0.0,
+        focus_depth=0.0,
+        element_spacing=req.element_spacing,
+        geometry=req.geometry,
+        curvature_radius=req.curvature_radius,
+        num_elements=req.num_elements,
+        snr=req.snr,
+        apodization_window=req.apodization,
+        wave_speed=300000.0
+    )
+    config.apply_apodization()
+
+    environment = RadarEnvironment(
+        targets=[],
+        noise_floor_dbm=req.noise_floor_dbm
+    )
+    active_radar = RadarScenario(config=config, environment=environment)
+    return {"message": f"Radar initialized with {req.num_elements} elements."}
+
+
+@app.post("/radar/scan")
+def radar_scan(req: RadarScanRequest):
+    """
+    Lightweight per-frame endpoint.
+    Updates target positions and scans the requested sector.
+    """
+    global active_radar
+
+    if active_radar is None:
+        raise HTTPException(status_code=400, detail="Radar not initialized. Call /radar/setup first.")
+
+    # Update environment targets in place — same pattern as 5G update-users
+    active_radar.environment.targets = [
+        RadarTargetObj(
+            target_id=t.target_id,
+            x_m=t.x_m,
+            y_m=t.y_m,
+            velocity_m_s=t.velocity_m_s,
+            rcs_sqm=t.rcs_sqm
+        ) for t in req.targets
+    ]
+
+    result = active_radar.generate_ppi_scan(
+        start_angle=req.start_angle,
+        end_angle=req.end_angle,
+        num_lines=req.num_lines,
+        max_range_m=req.max_range_m
+    )
+
+    return {
+        "ppi_image_base64": result.ppi_image_base64,
+        "detections": [d.__dict__ for d in result.detections]
+    }
 
 # --- Pydantic Schemas for API I/O ---
 

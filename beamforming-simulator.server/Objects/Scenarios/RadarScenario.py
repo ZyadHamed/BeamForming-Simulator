@@ -5,8 +5,8 @@ import base64
 import io
 from PIL import Image
 
-from ArrayConfig import ArrayConfig
-from Physics.RadarEnviroment import RadarEnvironment
+from Objects.ArrayConfig import ArrayConfig
+from Objects.Physics.RadarEnviroment import RadarEnvironment
 
 @dataclass
 class RadarDetection:
@@ -48,7 +48,6 @@ class RadarScenario:
         
         # Standard Radar Parameters
         Pt_dbm = 60.0  # Transmit power (e.g., 1 kW)
-        wavelength_m = (self.config.speed_of_sound * 1e6) / (self.config.elements[0].frequency * 1e6)
         
         for a_idx, steer_angle in enumerate(angles_deg):
             # Steer the array
