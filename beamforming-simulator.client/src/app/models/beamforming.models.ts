@@ -3,62 +3,62 @@
 // ══════════════════════════════════════════════════════════════════
 
 export type ArrayGeometry = 'linear' | 'curved';
-export type SimMode       = 'ultrasound' | '5g' | 'radar';
+export type SimMode       = 'generic-beam-forming' | 'ultrasound' | '5g' | 'radar';
 
-export interface ProbeElementConfig {
-  id                 : string;
-  label              : string;
-  color              : string;
-  frequency          : number; // MHz      [0.1 – 2000]
-  phaseShift         : number; // degrees  [0 – 360]
-  timeDelay          : number; // µs       [0 – 50]
-  intensity          : number; // %        [0 – 100]
-  enabled            : boolean;
-  apodizationWeight  : number;
-}
+  export interface ProbeElementConfig {
+    id                 : string;
+    label              : string;
+    color              : string;
+    frequency          : number; // MHz      [0.1 – 2000]
+    phaseShift         : number; // degrees  [0 – 360]
+    timeDelay          : number; // µs       [0 – 50]
+    intensity          : number; // %        [0 – 100]
+    enabled            : boolean;
+    apodizationWeight  : number;
+  }
 
-// AFTER:
-export interface ArrayConfig {
-  elements           : ProbeElementConfig[];
-  steeringAngle      : number;
-  focusDepth         : number;
-  elementSpacing     : number;
-  geometry           : ArrayGeometry;
-  curvatureRadius    : number;
-  numElements        : number;
-  snr                : number;
-  apodizationWindow  : 'none' | 'hanning' | 'hamming' | 'blackman' | 'kaiser' | 'tukey';
-  kaiserBeta         : number;
-  tukeyAlpha         : number;
-}
+  // AFTER:
+  export interface ArrayConfig {
+    elements           : ProbeElementConfig[];
+    steeringAngle      : number;
+    focusDepth         : number;
+    elementSpacing     : number;
+    geometry           : ArrayGeometry;
+    curvatureRadius    : number;
+    numElements        : number;
+    snr                : number;
+    apodizationWindow  : 'none' | 'hanning' | 'hamming' | 'blackman' | 'kaiser' | 'tukey';
+    kaiserBeta         : number;
+    tukeyAlpha         : number;
+  }
 
 
-export interface BeamformingResult {
-  /** Raw FFT data from the backend (complex [re,im] pairs per element) */
-  elementSpectra : { re: number[]; im: number[] }[];
-  /** Combined beam spectrum */
-  combinedSpectrum: { re: number[]; im: number[] };
-  /** Time-domain result after IFFT */
-  timeDomain     : number[];
-  /** Beam direction metadata */
-  beamAngle      : number;
-  sideLobeLevel  : number;
-  mainLobeWidth  : number;
-}
+  export interface BeamformingResult {
+    /** Raw FFT data from the backend (complex [re,im] pairs per element) */
+    elementSpectra : { re: number[]; im: number[] }[];
+    /** Combined beam spectrum */
+    combinedSpectrum: { re: number[]; im: number[] };
+    /** Time-domain result after IFFT */
+    timeDomain     : number[];
+    /** Beam direction metadata */
+    beamAngle      : number;
+    sideLobeLevel  : number;
+    mainLobeWidth  : number;
+  }
 
-export interface InterferenceFieldResult {
-  fieldData  : number[];   // flat row-major Float32 buffer, normalised 0–1
-  cols       : number;
-  rows       : number;
-}
+  export interface InterferenceFieldResult {
+    fieldData  : number[];   // flat row-major Float32 buffer, normalised 0–1
+    cols       : number;
+    rows       : number;
+  }
 
-export interface BeamProfileResult {
-  polarPattern  : number[];   // 181 values –90..+90
-  timeDomain    : number[];   // IFFT samples
-  beamAngle     : number;
-  mainLobeWidth : number;
-  sideLobeLevel : number;
-}
+  export interface BeamProfileResult {
+    polarPattern  : number[];   // 181 values –90..+90
+    timeDomain    : number[];   // IFFT samples
+    beamAngle     : number;
+    mainLobeWidth : number;
+    sideLobeLevel : number;
+  }
 
 
 export interface ScenarioPreset {

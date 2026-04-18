@@ -1,0 +1,178 @@
+<!-- ════════════════════════════════════════════════════════
+     BeamBuilderComponent
+     ════════════════════════════════════════════════════════ -->
+<div class="bb-root">
+
+  <!-- ── Tabs ──────────────────────────────────────────────── -->
+  <div class="bb-tabs">
+    <button class="bb-tab" [class.active]="mode === 'specs'"    (click)="mode = 'specs'">From Specs</button>
+    <button class="bb-tab" [class.active]="mode === 'elements'" (click)="mode = 'elements'">From Elements</button>
+  </div>
+
+  <!-- ══ OPTION 1: From Specs ══════════════════════════════════ -->
+  <div class="bb-form" *ngIf="mode === 'specs'">
+    <div class="bb-row">
+      <label>Frequency (MHz)
+        <input type="number" [(ngModel)]="specs.frequency_mhz" step="0.5" min="1" max="20"/>
+      </label>
+      <label>Elements
+        <input type="number" [(ngModel)]="specs.num_elements" min="2" max="128"/>
+      </label>
+      <label>Steering (°)
+        <input type="number" [(ngModel)]="specs.steering_angle" min="-60" max="60"/>
+      </label>
+      <label>Focus depth (mm)
+        <input type="number" [(ngModel)]="specs.focus_depth" min="0" max="300"/>
+      </label>
+      <label>Spacing (mm)
+        <input type="number" [(ngModel)]="specs.element_spacing" step="0.1" min="0.1"/>
+      </label>
+      <label>Wave speed (m/s)
+        <input type="number" [(ngModel)]="specs.wave_speed" min="300" max="6000"/>
+      </label>
+      <label>SNR (dB)
+        <input type="number" [(ngModel)]="specs.snr" min="0" max="120" step="5"/>
+      </label>
+      <label>Geometry
+        <select [(ngModel)]="specs.geometry">
+          <option value="linear">Linear</option>
+          <option value="curved">Curved</option>
+        </select>
+      </label>
+      <label *ngIf="specs.geometry === 'curved'">Curvature (mm)
+        <input type="number" [(ngModel)]="specs.curvature_radius" min="10" max="500" step="5"/>
+      </label>
+      <label>Apodization
+        <select [(ngModel)]="specs.apodization">
+          <option value="none">None</option>
+          <option value="hanning">Hanning</option>
+          <option value="hamming">Hamming</option>
+          <option value="blackman">Blackman</option>
+          <option value="kaiser">Kaiser</option>
+          <option value="tukey">Tukey</option>
+        </select>
+      </label>
+    </div>
+    <div class="bb-row">
+      <button class="bb-btn" (click)="submitSpecs()" [disabled]="loading">
+        {{ loading ? 'Computing…' : 'Build Beam' }}
+      </button>
+    </div>
+  </div>
+
+  <!-- ══ OPTION 2: From Elements ═══════════════════════════════ -->
+  <div class="bb-elements-layout" *ngIf="mode === 'elements'">
+
+    <!-- Left: Array config controls + submit -->
+    <div class="bb-elem-sidebar">
+      <div class="bb-sidebar-section">
+        <span class="bb-sidebar-title">Array Config</span>
+
+        <div class="bb-ctrl-group">
+          <label>Geometry
+            <select [(ngModel)]="elemGeometry" (ngModelChange)="applyElemArrayConfig()">
+              <option value="linear">Linear</option>
+              <option value="curved">Curved</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="bb-ctrl-group" *ngIf="elemGeometry === 'curved'">
+          <label>Curvature (mm)
+            <input type="number" [(ngModel)]="elemCurvatureRadius" min="10" max="500" step="5"
+              (change)="applyElemArrayConfig()"/>
+          </label>
+        </div>
+
+        <div class="bb-ctrl-group">
+          <label>Spacing (mm)
+            <input type="number" [(ngModel)]="elemSpacing" step="0.1" min="0.1"
+              (change)="applyElemArrayConfig()"/>
+          </label>
+        </div>
+
+        <div class="bb-ctrl-group">
+          <label>Steering (°)
+            <input type="number" [(ngModel)]="elemSteering" min="-60" max="60"
+              (change)="applyElemArrayConfig()"/>
+          </label>
+        </div>
+
+        <div class="bb-ctrl-group">
+          <label>Focus depth (mm)
+            <input type="number" [(ngModel)]="elemFocus" min="0" max="300"
+              (change)="applyElemArrayConfig()"/>
+          </label>
+        </div>
+      </div>
+
+      <button class="bb-btn bb-btn--full" (click)="submitElements()" [disabled]="loading">
+        {{ loading ? 'Computing…' : 'Build Beam' }}
+      </button>
+    </div>
+
+    <!-- Right: ProbeArrayComponent (animated, per-element editing) -->
+    <div class="bb-elem-probe">
+      <app-probe-array
+        [arrayConfig]="elemArrayConfig"
+        [label]="'Custom Array'"
+        [showBeamResult]="false"
+        (configChange)="onElemArrayConfigChange($event)"
+      ></app-probe-array>
+    </div>
+
+  </div>
+
+  <!-- ── Error ─────────────────────────────────────────────── -->
+  <div class="bb-error" *ngIf="error">{{ error }}</div>
+
+  <!-- ── Results ───────────────────────────────────────────── -->
+  <div class="bb-results" *ngIf="hasResult">
+
+    <!-- Metrics strip -->
+    <div class="bb-metrics">
+      <div class="bb-metric">
+        <span class="bb-metric__label">Beam angle</span>
+        <span class="bb-metric__val">{{ beamAngle | number:'1.1-1' }}°</span>
+      </div>
+      <div class="bb-metric">
+        <span class="bb-metric__label">−3 dB width</span>
+        <span class="bb-metric__val">{{ mainLobeWidth | number:'1.2-2' }}°</span>
+      </div>
+      <div class="bb-metric">
+        <span class="bb-metric__label">Side lobe</span>
+        <span class="bb-metric__val">
+          {{ sideLobeLevel !== null ? (sideLobeLevel | number:'1.1-1') + ' dB' : '—' }}
+        </span>
+      </div>
+    </div>
+
+    <!-- Two-panel row -->
+    <div class="bb-panels">
+
+      <!-- Panel A: Interference map -->
+      <div class="bb-panel">
+        <div class="bb-panel__header">
+          <span class="bb-panel__title">Interference Map</span>
+          <span class="bb-panel__badge blue">Backend</span>
+        </div>
+        <div class="bb-panel__body">
+          <img *ngIf="interferenceMap" [src]="interferenceMap" class="bb-imap" alt="Interference map"/>
+        </div>
+      </div>
+
+      <!-- Panel B: Polar beam profile -->
+      <div class="bb-panel">
+        <div class="bb-panel__header">
+          <span class="bb-panel__title">Beam Profile</span>
+          <span class="bb-panel__badge green">Backend · Polar</span>
+        </div>
+        <div class="bb-panel__body">
+          <canvas #polarCanvas class="bb-canvas"></canvas>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</div>

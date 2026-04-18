@@ -71,6 +71,11 @@
   <!-- ══ MAIN CONTENT ═══════════════════════════════════════════ -->
   <main class="main-content">
 
+    @if(activeMode === 'generic-beam-forming')
+    {
+      <app-beam-builder></app-beam-builder>
+    }
+
     <!-- Mode: Ultrasound -->
     <app-mode-ultrasound
       *ngIf="activeMode === 'ultrasound'"

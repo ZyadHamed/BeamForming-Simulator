@@ -1,0 +1,432 @@
+/* ══════════════════════════════════════════════════════════════════
+   BeamBuilderComponent styles
+   ══════════════════════════════════════════════════════════════════ */
+
+:host {
+  display       : flex;
+  flex-direction: column;
+  height        : 100%;
+  overflow      : hidden;
+}
+
+.bb-root {
+  display       : flex;
+  flex-direction: column;
+  height        : 100%;
+  overflow      : hidden;
+  background    : var(--bg-app);
+}
+
+/* ── Tabs ───────────────────────────────────────────────────────── */
+.bb-tabs {
+  display      : flex;
+  border-bottom: 1px solid var(--border);
+  background   : var(--bg-surface);
+  flex-shrink  : 0;
+  padding      : 0 12px;
+}
+
+.bb-tab {
+  padding        : 10px 16px;
+  background     : transparent;
+  border         : none;
+  border-bottom  : 2px solid transparent;
+  color          : var(--text-muted);
+  font-family    : var(--font-ui);
+  font-size      : 11px;
+  font-weight    : 600;
+  letter-spacing : 0.07em;
+  text-transform : uppercase;
+  cursor         : pointer;
+  transition     : color 120ms, border-color 120ms;
+  margin-bottom  : -1px;
+}
+
+.bb-tab:hover  { color: var(--text-secondary); }
+
+.bb-tab.active {
+  color              : var(--accent-blue);
+  border-bottom-color: var(--accent-blue);
+}
+
+/* ── Form panel ─────────────────────────────────────────────────── */
+.bb-form {
+  display       : flex;
+  flex-direction: column;
+  gap           : 10px;
+  padding       : 12px 14px;
+  border-bottom : 1px solid var(--border-light);
+  background    : var(--bg-surface);
+  flex-shrink   : 0;
+}
+
+.bb-row {
+  display    : flex;
+  flex-wrap  : wrap;
+  gap        : 10px;
+  align-items: flex-end;
+}
+
+/* ── Labels & inputs ────────────────────────────────────────────── */
+label {
+  display       : flex;
+  flex-direction: column;
+  gap           : 5px;
+  font-family   : var(--font-ui);
+  font-size     : 10px;
+  font-weight   : 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color         : var(--text-muted);
+}
+
+input[type=number] {
+  width        : 100px;
+  appearance   : none;
+  background   : var(--bg-app);
+  border       : 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color        : var(--text-primary);
+  font-family  : var(--font-mono);
+  font-size    : 12px;
+  padding      : 5px 8px;
+  transition   : border-color 140ms;
+}
+
+input[type=number]:focus {
+  outline     : none;
+  border-color: var(--accent-blue);
+}
+
+select {
+  appearance      : none;
+  background-color: var(--bg-app);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%237a8fa6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  border          : 1px solid var(--border);
+  border-radius   : var(--radius-sm);
+  color           : var(--text-primary);
+  font-family     : var(--font-ui);
+  font-size       : 12px;
+  padding         : 5px 28px 5px 9px;
+  cursor          : pointer;
+  transition      : border-color 140ms;
+}
+
+select:focus {
+  outline     : none;
+  border-color: var(--accent-blue);
+}
+
+input[type=checkbox] {
+  width       : 14px;
+  height      : 14px;
+  cursor      : pointer;
+  accent-color: var(--accent-blue);
+  margin-top  : 2px;
+}
+
+/* ── Buttons ────────────────────────────────────────────────────── */
+.bb-btn {
+  display      : inline-flex;
+  align-items  : center;
+  gap          : 6px;
+  padding      : 7px 16px;
+  background   : var(--accent-blue);
+  color        : #fff;
+  border       : 1px solid var(--accent-blue);
+  border-radius: var(--radius-sm);
+  font-family  : var(--font-ui);
+  font-size    : 12px;
+  font-weight  : 600;
+  cursor       : pointer;
+  transition   : background 120ms, border-color 120ms;
+  white-space  : nowrap;
+  box-shadow   : 0 2px 6px rgba(26,115,232,0.20);
+}
+
+.bb-btn:hover:not(:disabled) {
+  background  : #1558c0;
+  border-color: #1558c0;
+}
+
+.bb-btn:disabled { opacity: .45; cursor: not-allowed; }
+
+.bb-btn--outline {
+  background: var(--bg-surface);
+  color     : var(--accent-blue);
+  box-shadow: none;
+}
+
+.bb-btn--outline:hover:not(:disabled) {
+  background  : var(--accent-blue-bg);
+  border-color: var(--accent-blue);
+}
+
+/* ── Element table ──────────────────────────────────────────────── */
+.bb-table-wrap {
+  overflow-x: auto;
+}
+
+.bb-table {
+  width          : 100%;
+  border-collapse: collapse;
+  font-size      : 12px;
+}
+
+.bb-table th {
+  font-family   : var(--font-ui);
+  font-size     : 9px;
+  font-weight   : 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color         : var(--text-muted);
+  padding       : 5px 8px;
+  text-align    : left;
+  border-bottom : 1px solid var(--border);
+  white-space   : nowrap;
+}
+
+.bb-table td {
+  padding       : 4px 8px;
+  border-bottom : 1px solid var(--border-light);
+  vertical-align: middle;
+}
+
+.bb-table tr:last-child td { border-bottom: none; }
+
+.bb-table input[type=number] { width: 76px; }
+
+.bb-rm {
+  background   : none;
+  border       : none;
+  color        : var(--text-muted);
+  cursor       : pointer;
+  font-size    : 14px;
+  line-height  : 1;
+  padding      : 2px 4px;
+  border-radius: var(--radius-sm);
+  transition   : color 120ms, background 120ms;
+}
+
+.bb-rm:hover { color: var(--accent-red); background: rgba(220,38,38,0.08); }
+
+/* ── Error ──────────────────────────────────────────────────────── */
+.bb-error {
+  margin       : 8px 14px 0;
+  padding      : 8px 12px;
+  background   : rgba(220,38,38,0.07);
+  border       : 1px solid rgba(220,38,38,0.2);
+  border-radius: var(--radius-sm);
+  color        : var(--accent-red);
+  font-size    : 11px;
+  font-family  : var(--font-ui);
+  flex-shrink  : 0;
+}
+
+/* ── Viewer area ────────────────────────────────────────────────── */
+.bb-viewer {
+  flex      : 1;
+  overflow  : hidden;
+  display   : flex;
+  min-height: 0;
+}
+
+.bb-viewer app-beamforming-viewer {
+  flex     : 1;
+  min-width: 0;
+}
+
+/* ── Results area ───────────────────────────────────────────────── */
+.bb-results {
+  display       : flex;
+  flex-direction: column;
+  flex          : 1;
+  overflow      : hidden;
+  min-height    : 0;
+}
+
+/* ── Metrics strip ──────────────────────────────────────────────── */
+.bb-metrics {
+  display      : flex;
+  gap          : 1px;
+  background   : var(--border);
+  border-bottom: 1px solid var(--border);
+  flex-shrink  : 0;
+}
+
+.bb-metric {
+  display       : flex;
+  flex-direction: column;
+  gap           : 2px;
+  padding       : 8px 14px;
+  background    : var(--bg-surface);
+  flex          : 1;
+}
+
+.bb-metric__label {
+  font-family   : var(--font-ui);
+  font-size     : 9px;
+  font-weight   : 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color         : var(--text-muted);
+}
+
+.bb-metric__val {
+  font-family: var(--font-mono);
+  font-size  : 14px;
+  font-weight: 700;
+  color      : var(--text-primary);
+}
+
+/* ── Two-panel row ──────────────────────────────────────────────── */
+.bb-panels {
+  display   : flex;
+  flex      : 1;
+  gap       : 10px;
+  padding   : 10px;
+  overflow  : hidden;
+  min-height: 0;
+  background: var(--bg-app);
+}
+
+.bb-panel {
+  display       : flex;
+  flex-direction: column;
+  background    : var(--bg-surface);
+  border        : 1px solid var(--border);
+  border-radius : var(--radius-md);
+  overflow      : hidden;
+  flex          : 1;
+  min-width     : 0;
+  box-shadow    : var(--shadow-sm);
+}
+
+.bb-panel--viewer {
+  flex: 2;   /* give beam viewer more space */
+}
+
+.bb-panel__header {
+  display        : flex;
+  align-items    : center;
+  justify-content: space-between;
+  padding        : 7px 10px;
+  background     : var(--bg-input-hd);
+  border-bottom  : 1px solid var(--border);
+  flex-shrink    : 0;
+}
+
+.bb-panel__title {
+  font-family   : var(--font-ui);
+  font-size     : 10px;
+  font-weight   : 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color         : var(--text-secondary);
+}
+
+.bb-panel__badge {
+  font-size     : 9px;
+  font-weight   : 700;
+  padding       : 2px 7px;
+  border-radius : 20px;
+  letter-spacing: 0.05em;
+}
+
+.bb-panel__badge.blue  { background: rgba(26,115,232,0.12); color: var(--accent-blue); }
+.bb-panel__badge.green { background: rgba(52,168,83,0.12);  color: var(--accent-green); }
+
+.bb-panel__body {
+  flex    : 1;
+  overflow: hidden;
+  display : flex;
+  min-height: 0;
+}
+
+/* ── Interference map image ─────────────────────────────────────── */
+.bb-imap {
+  width     : 100%;
+  height    : 100%;
+  object-fit: contain;
+  display   : block;
+}
+
+/* ── Polar canvas ───────────────────────────────────────────────── */
+.bb-canvas {
+  display: block;
+  width  : 100%;
+  height : 100%;
+}
+
+/* ── Elements tab layout ────────────────────────────────────────── */
+.bb-elements-layout {
+  display    : flex;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border-light);
+  background : var(--bg-surface);
+  max-height : 480px;
+  min-height : 320px;
+}
+
+/* Left sidebar: array config controls */
+.bb-elem-sidebar {
+  width         : 200px;
+  flex-shrink   : 0;
+  display       : flex;
+  flex-direction: column;
+  border-right  : 1px solid var(--border-light);
+  padding       : 12px;
+  gap           : 10px;
+  overflow-y    : auto;
+}
+
+.bb-sidebar-section {
+  display       : flex;
+  flex-direction: column;
+  gap           : 8px;
+  flex          : 1;
+}
+
+.bb-sidebar-title {
+  font-family   : var(--font-ui);
+  font-size     : 10px;
+  font-weight   : 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color         : var(--text-muted);
+  padding-bottom: 6px;
+  border-bottom : 1px solid var(--border-light);
+}
+
+.bb-ctrl-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.bb-ctrl-group label {
+  gap: 4px;
+}
+
+.bb-ctrl-group input[type=number],
+.bb-ctrl-group select {
+  width: 100%;
+}
+
+.bb-btn--full {
+  width: 100%;
+  justify-content: center;
+}
+
+/* Right: probe array takes remaining space */
+.bb-elem-probe {
+  flex    : 1;
+  overflow: hidden;
+  display : flex;
+  min-width: 0;
+}
+
+.bb-elem-probe app-probe-array {
+  flex: 1;
+}
