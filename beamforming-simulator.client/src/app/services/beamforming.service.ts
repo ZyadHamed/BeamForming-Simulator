@@ -132,11 +132,11 @@ export class BeamformingService {
       velocity_m_s: number;
       rcs_sqm: number;
     }[];
-  }): Observable<{ ppi_image_base64: string; detections: any[] }> {
-    return this.http.post<{ ppi_image_base64: string; detections: any[] }>(
-      `${API_BASE}/radar/scan`,
-      req,
-    );
+  }): Observable<{ sweep_data: { angle_deg: number; range_bins: number[] }[]; detections: any[] }> {
+    return this.http.post<{
+      sweep_data: { angle_deg: number; range_bins: number[] }[];
+      detections: any[];
+    }>(`${API_BASE}/radar/scan`, req);
   }
 
   /** Compute element delays for a target steering angle (backend). */

@@ -230,39 +230,36 @@ def radar_setup(req: RadarSetupRequest):
     active_radar = RadarScenario(config=config, environment=environment)
     return {"message": f"Radar initialized with {req.num_elements} elements."}
 
-
 @app.post("/radar/scan")
 def radar_scan(req: RadarScanRequest):
-    """
-    Lightweight per-frame endpoint.
-    Updates target positions and scans the requested sector.
-    """
     global active_radar
 
     if active_radar is None:
-        raise HTTPException(status_code=400, detail="Radar not initialized. Call /radar/setup first.")
+        raise HTTPException(
+            status_code=400,
+            detail="Radar not initialized. Call /radar/setup first."
+        )
 
-    # Update environment targets in place — same pattern as 5G update-users
     active_radar.environment.targets = [
         RadarTargetObj(
-            target_id=t.target_id,
-            x_m=t.x_m,
-            y_m=t.y_m,
-            velocity_m_s=t.velocity_m_s,
-            rcs_sqm=t.rcs_sqm
+            target_id    = t.target_id,
+            x_m          = t.x_m,
+            y_m          = t.y_m,
+            velocity_m_s = t.velocity_m_s,
+            rcs_sqm      = t.rcs_sqm,
         ) for t in req.targets
     ]
 
     result = active_radar.generate_ppi_scan(
-        start_angle=req.start_angle,
-        end_angle=req.end_angle,
-        num_lines=req.num_lines,
-        max_range_m=req.max_range_m
+        start_angle = req.start_angle,
+        end_angle   = req.end_angle,
+        num_lines   = req.num_lines,
+        max_range_m = req.max_range_m,
     )
 
     return {
-        "ppi_image_base64": result.ppi_image_base64,
-        "detections": [d.__dict__ for d in result.detections]
+        "sweep_data" : result.sweep_data,
+        "detections" : [d.__dict__ for d in result.detections],
     }
 
 # --- Pydantic Schemas for API I/O ---

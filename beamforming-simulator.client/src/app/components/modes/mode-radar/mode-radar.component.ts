@@ -1,10 +1,6 @@
 // ══════════════════════════════════════════════════════════════════
 //  ModeRadarComponent
-//  Phased-array radar beamforming simulator:
-//    • Circular scan field
-//    • Beam steered by per-element phase delays (not rotating line)
-//    • Target placement + detection
-//    • Side-by-side: beamforming scan vs traditional rotating radar
+//  Phased-array radar beamforming simulator
 // ══════════════════════════════════════════════════════════════════
 
 import {
@@ -30,14 +26,19 @@ import {
   InterferenceFieldComponent,
   ElementPosition,
 } from '../../interference-field/interference-field.component';
+
 interface RadarTarget {
-  id: string; // frontend identity (matches target_id sent to backend)
-  angle: number;
+  id: string;
+  angle: number; // degrees, 0–360
   range: number; // 0–1 fraction of maxRangeM
-  rcs: number;
+  rcs: number; // body size / cross-section (1–20)
   label: string;
-  detected: boolean; // set by applyBackendResult, not checkDetections
-  blipAge: number; // incremented locally between scans for fade-out
+  // Phased-array detection state
+  detected: boolean;
+  blipAge: number;
+  // Traditional radar detection state — fully independent
+  trdDetected: boolean;
+  trdBlipAge: number;
 }
 
 @Component({
@@ -52,25 +53,27 @@ export class ModeRadarComponent implements OnInit, OnDestroy {
   @ViewChild('bfCanvas', { static: true }) bfCanvasRef!: ElementRef<HTMLCanvasElement>;
   @ViewChild('trdCanvas', { static: true }) trdCanvasRef!: ElementRef<HTMLCanvasElement>;
 
+  // ── Public state (bound in template) ──────────────────────────
   arrayConfig: ArrayConfig = makeDefaultArrayConfig(12);
   targets: RadarTarget[] = [];
-  scanAngle: number = 0; // current beam angle (degrees)
-  scanSpeed: number = 1.2; // degrees per frame
-  scanRange: number = 1; // full range (0–1)
-  scanDirection: number = 1; // +1 cw, -1 ccw
+  scanAngle: number = 0;
+  scanSpeed: number = 1.2;
+  scanRange: number = 1; // 0–1 fraction of maxRangeM
+  scanDirection: number = 1;
   sweepMode: 'sector' | 'full' = 'full';
   sectorMin: number = -60;
   sectorMax: number = 60;
+  beamWidth: number = 30; // degrees — controls sweep width
   detectedCount: number = 0;
 
-  // Traditional radar state
+  // ── Private state ──────────────────────────────────────────────
   private trdAngle: number = 0;
-
   private animId: number = 0;
   private t: number = 0;
-
+  private radarReady: boolean = false;
   private readonly maxRangeM = 100;
-  private radarReady = false;
+  private readonly trdScanSpeed = 0.6; // fixed, independent of scanSpeed
+  private readonly trdBeamWidth = 20; // fixed wide beam, no steering
 
   constructor(
     private beamSvc: BeamformingService,
@@ -84,16 +87,56 @@ export class ModeRadarComponent implements OnInit, OnDestroy {
     if (preset) this.arrayConfig = { ...preset.array };
 
     this.targets = [
-      { id: 't1', angle: 35, range: 0.55, detected: false, label: 'TGT-A', rcs: 5, blipAge: 999 },
-      { id: 't2', angle: 120, range: 0.7, detected: false, label: 'TGT-B', rcs: 3, blipAge: 999 },
-      { id: 't3', angle: 220, range: 0.4, detected: false, label: 'TGT-C', rcs: 8, blipAge: 999 },
-      { id: 't4', angle: 310, range: 0.65, detected: false, label: 'TGT-D', rcs: 2, blipAge: 999 },
+      {
+        id: 't1',
+        angle: 35,
+        range: 0.55,
+        rcs: 5,
+        label: 'TGT-A',
+        detected: false,
+        blipAge: 999,
+        trdDetected: false,
+        trdBlipAge: 999,
+      },
+      {
+        id: 't2',
+        angle: 120,
+        range: 0.7,
+        rcs: 3,
+        label: 'TGT-B',
+        detected: false,
+        blipAge: 999,
+        trdDetected: false,
+        trdBlipAge: 999,
+      },
+      {
+        id: 't3',
+        angle: 220,
+        range: 0.4,
+        rcs: 8,
+        label: 'TGT-C',
+        detected: false,
+        blipAge: 999,
+        trdDetected: false,
+        trdBlipAge: 999,
+      },
+      {
+        id: 't4',
+        angle: 310,
+        range: 0.65,
+        rcs: 2,
+        label: 'TGT-D',
+        detected: false,
+        blipAge: 999,
+        trdDetected: false,
+        trdBlipAge: 999,
+      },
     ];
 
-    // Always start the animation immediately — canvas must never be black
+    // Canvas must animate immediately — never black
     this.startAnimation();
 
-    // Setup radar in parallel; if it fails, scans are skipped gracefully
+    // Setup radar async; scans are silently skipped until ready
     this.beamSvc
       .setupRadar({
         num_elements: this.arrayConfig.numElements,
@@ -119,27 +162,29 @@ export class ModeRadarComponent implements OnInit, OnDestroy {
     cancelAnimationFrame(this.animId);
   }
 
-  // ── Controls ───────────────────────────────────────────────────
+  // ── Template helpers ───────────────────────────────────────────
+
   get interferencePositions(): ElementPosition[] {
-    const W = 360;
-    const H = 360;
-    const cx = W / 2;
-    const cy = H / 2;
+    const W = 360,
+      H = 360;
+    const cx = W / 2,
+      cy = H / 2;
     const n = this.arrayConfig.elements.length;
     const d = this.arrayConfig.elementSpacing * 2;
-
     return this.arrayConfig.elements.map((el, i) => ({
       x: cx + (i - (n - 1) / 2) * d,
       y: cy,
       config: el,
     }));
   }
+
   onArrayConfigChange(cfg: ArrayConfig): void {
     this.arrayConfig = cfg;
     this.cdr.markForCheck();
   }
 
   addTarget(): void {
+    if (this.targets.length >= 5) return;
     const angle = Math.random() * 360;
     const range = 0.3 + Math.random() * 0.6;
     const idx = this.targets.length;
@@ -149,10 +194,12 @@ export class ModeRadarComponent implements OnInit, OnDestroy {
         id: `t${Date.now()}`,
         angle,
         range,
-        detected: false,
+        rcs: 5,
         label: `TGT-${String.fromCharCode(65 + (idx % 26))}`,
-        rcs: 1 + Math.random() * 8,
+        detected: false,
         blipAge: 999,
+        trdDetected: false,
+        trdBlipAge: 999,
       },
     ];
     this.cdr.markForCheck();
@@ -167,20 +214,22 @@ export class ModeRadarComponent implements OnInit, OnDestroy {
     this.sweepMode = this.sweepMode === 'full' ? 'sector' : 'full';
   }
 
-  // ── Animation ──────────────────────────────────────────────────
+  // ── Animation loop ─────────────────────────────────────────────
 
   private startAnimation(): void {
     const loop = () => {
       this.t += 1;
       this.advanceScan();
+
+      // Age phased-array blips every frame
       this.targets = this.targets.map((t) => ({ ...t, blipAge: t.blipAge + 1 }));
 
-      if (this.t % 6 === 0) {
-        this.requestBackendScan();
-      }
+      // Traditional radar: real physical detection, independent state
+      this.checkTraditionalDetections();
 
-      // Always paint the beamforming canvas locally —
-      // applyBackendResult will overdraw this when backend responds
+      // Backend scan every 6 frames
+      if (this.t % 6 === 0) this.requestBackendScan();
+
       this.drawBeamformingFallback();
       this.drawTraditional();
       this.animId = requestAnimationFrame(loop);
@@ -189,6 +238,7 @@ export class ModeRadarComponent implements OnInit, OnDestroy {
   }
 
   private advanceScan(): void {
+    // Phased array — user-controlled speed
     if (this.sweepMode === 'full') {
       this.scanAngle = (this.scanAngle + this.scanSpeed) % 360;
     } else {
@@ -203,80 +253,155 @@ export class ModeRadarComponent implements OnInit, OnDestroy {
       }
     }
 
-    this.trdAngle = (this.trdAngle + this.scanSpeed * 0.8) % 360;
+    // Traditional — fixed independent speed, always full 360
+    this.trdAngle = (this.trdAngle + this.trdScanSpeed) % 360;
   }
 
-  // ── Beamforming radar canvas ───────────────────────────────────
+  // ── Traditional radar: real physical sweep detection ───────────
+
+  private checkTraditionalDetections(): void {
+    const halfBeam = this.trdBeamWidth / 2;
+    this.targets = this.targets.map((tgt) => {
+      let t = { ...tgt, trdBlipAge: tgt.trdBlipAge + 1 };
+      let diff = (tgt.angle - this.trdAngle + 360) % 360;
+      if (diff > 180) diff = 360 - diff;
+      if (diff < halfBeam && tgt.range <= this.scanRange) {
+        t = { ...t, trdDetected: true, trdBlipAge: 0 };
+      } else if (t.trdBlipAge > 200) {
+        t = { ...t, trdDetected: false };
+      }
+      return t;
+    });
+  }
+
+  // ── Phased array: backend scan ─────────────────────────────────
 
   private requestBackendScan(): void {
-    if (!this.radarReady) return; // ← skip silently until setup succeeds
-    const sweepHalf = 15;
+    if (!this.radarReady) return;
+    const sweepHalf = this.beamWidth / 2;
+    // Narrower beam → more lines for finer angular resolution
+    const numLines = Math.max(8, Math.round((60 / this.beamWidth) * 16));
     this.beamSvc
       .scanRadar({
         start_angle: this.scanAngle - sweepHalf,
         end_angle: this.scanAngle + sweepHalf,
-        num_lines: 32,
-        max_range_m: this.maxRangeM,
+        num_lines: numLines,
+        max_range_m: this.scanRange * this.maxRangeM,
         targets: this.targets.map((t) => this.toCartesian(t)),
       })
       .subscribe((result) => this.applyBackendResult(result));
   }
 
-  private applyBackendResult(result: { ppi_image_base64: string; detections: any[] }): void {
-    // 1. Draw the backend PPI image slice onto the beamforming canvas
+  private applyBackendResult(result: {
+    sweep_data: { angle_deg: number; range_bins: number[] }[];
+    detections: any[];
+  }): void {
     const canvas = this.bfCanvasRef?.nativeElement;
-    if (canvas) {
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        const W = canvas.width || 360;
-        const H = canvas.height || 360;
-        const cx = W / 2,
-          cy = H / 2;
-        const R = Math.min(W, H) / 2 - 16;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
 
-        const img = new Image();
-        img.onload = () => {
-          // Fade previous frame
-          ctx.fillStyle = 'rgba(2,10,20,0.08)';
-          ctx.fillRect(0, 0, W, H);
+    const W = canvas.width || 360;
+    const H = canvas.height || 360;
+    const cx = W / 2,
+      cy = H / 2;
+    const R = Math.min(W, H) / 2 - 16;
 
-          // Clip to radar circle and stamp PPI slice
-          ctx.save();
-          ctx.beginPath();
-          ctx.arc(cx, cy, R, 0, Math.PI * 2);
-          ctx.clip();
-          ctx.drawImage(img, cx - R, cy - R, R * 2, R * 2);
-          ctx.restore();
+    // Render each sweep line as polar arc slices with SNR-mapped intensity
+    result.sweep_data.forEach((line) => {
+      const angleRad = ((line.angle_deg - 90) * Math.PI) / 180;
+      const numBins = line.range_bins.length;
+      const halfRad = ((this.beamWidth / 2) * Math.PI) / 180;
 
-          // Grid / rings on top
-          this.drawRadarBg(ctx, cx, cy, R, '#0a1420', '#1a73e8');
+      line.range_bins.forEach((intensity, binIdx) => {
+        if (intensity < 0.01) return;
+        const r0 = (binIdx / numBins) * R;
+        const r1 = ((binIdx + 1) / numBins) * R;
 
-          // Blips driven by backend detections
-          this.drawTargetBlips(ctx, cx, cy, R, true);
-
-          ctx.fillStyle = 'rgba(26,115,232,0.7)';
-          ctx.font = 'bold 9px IBM Plex Mono, monospace';
-          ctx.textAlign = 'center';
-          ctx.fillText('PHASED ARRAY BEAMFORMING', cx, H - 6);
-
-          this.cdr.markForCheck();
-        };
-        img.src = result.ppi_image_base64;
-      }
-    }
-
-    // 2. Match detections back to targets by target_id
-    const detectedIds = new Set(result.detections.map((d: any) => d.target_id ?? null));
-    // Note: detections currently carry range_m/angle_deg, not target_id.
-    // Until backend echoes target_id, fall back to angle proximity:
-    const detectedAngles: number[] = result.detections.map((d: any) => d.angle_deg);
-
-    this.targets = this.targets.map((tgt) => {
-      const hit = detectedAngles.some((a) => Math.abs(a - tgt.angle) < 5);
-      return hit ? { ...tgt, detected: true, blipAge: 0 } : { ...tgt, detected: tgt.blipAge < 120 };
+        ctx.beginPath();
+        ctx.moveTo(cx + r0 * Math.cos(angleRad - halfRad), cy + r0 * Math.sin(angleRad - halfRad));
+        ctx.arc(cx, cy, r1, angleRad - halfRad, angleRad + halfRad);
+        ctx.arc(cx, cy, r0, angleRad + halfRad, angleRad - halfRad, true);
+        ctx.closePath();
+        ctx.fillStyle = `rgba(26,115,232,${(intensity * 0.85).toFixed(3)})`;
+        ctx.fill();
+      });
     });
 
+    // Grid and blips on top of intensity
+    this.drawRadarBg(ctx, cx, cy, R, '#0a1420', '#1a73e8');
+    this.drawTargetBlips(ctx, cx, cy, R, true);
+
+    ctx.fillStyle = 'rgba(26,115,232,0.7)';
+    ctx.font = 'bold 9px IBM Plex Mono, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('PHASED ARRAY BEAMFORMING', cx, H - 6);
+
+    // Match detections to targets by target_id
+    const detectedIds = new Set(result.detections.map((d: any) => d.target_id));
+    this.targets = this.targets.map((tgt) => {
+      const hit = detectedIds.has(tgt.id);
+      return hit ? { ...tgt, detected: true, blipAge: 0 } : { ...tgt, detected: tgt.blipAge < 120 };
+    });
     this.detectedCount = result.detections.length;
+    this.cdr.markForCheck();
+  }
+
+  // ── Beamforming canvas: fallback paint (runs every frame) ──────
+
+  private drawBeamformingFallback(): void {
+    const canvas = this.bfCanvasRef?.nativeElement;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const W = (canvas.width = canvas.offsetWidth || 360);
+    const H = (canvas.height = canvas.offsetHeight || 360);
+    const cx = W / 2,
+      cy = H / 2;
+    const R = Math.min(W, H) / 2 - 16;
+
+    // Fade previous frame
+    ctx.fillStyle = 'rgba(2,10,20,0.08)';
+    ctx.fillRect(0, 0, W, H);
+
+    this.drawRadarBg(ctx, cx, cy, R, '#0a1420', '#1a73e8');
+
+    // Animated beam cone — shows sweep direction at all times
+    const angleRad = ((this.scanAngle - 90) * Math.PI) / 180;
+    const halfRad = ((this.beamWidth / 2) * Math.PI) / 180;
+
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, R, angleRad - halfRad, angleRad + halfRad);
+    ctx.closePath();
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, R);
+    grad.addColorStop(0, 'rgba(26,115,232,0.4)');
+    grad.addColorStop(0.7, 'rgba(26,115,232,0.15)');
+    grad.addColorStop(1, 'rgba(26,115,232,0.0)');
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Beam axis line
+    ctx.beginPath();
+    ctx.strokeStyle = 'rgba(100,200,255,0.9)';
+    ctx.lineWidth = 1.5;
+    ctx.shadowColor = '#64c8ff';
+    ctx.shadowBlur = 10;
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + R * Math.cos(angleRad), cy + R * Math.sin(angleRad));
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // Angle label
+    ctx.fillStyle = 'rgba(100,200,255,0.8)';
+    ctx.font = '9px IBM Plex Mono, monospace';
+    ctx.textAlign = 'center';
+    const lx = cx + (R + 12) * Math.cos(angleRad);
+    const ly = cy + (R + 12) * Math.sin(angleRad);
+    ctx.fillText(`${this.scanAngle.toFixed(0)}°`, lx, ly);
+
+    this.drawTargetBlips(ctx, cx, cy, R, true);
   }
 
   // ── Traditional radar canvas ───────────────────────────────────
@@ -293,15 +418,14 @@ export class ModeRadarComponent implements OnInit, OnDestroy {
       cy = H / 2;
     const R = Math.min(W, H) / 2 - 16;
 
-    // Fade
     ctx.fillStyle = 'rgba(2,10,10,0.08)';
     ctx.fillRect(0, 0, W, H);
 
     this.drawRadarBg(ctx, cx, cy, R, '#0a1410', '#34a853');
 
-    // Simple rotating sweep line
     const angleRad = ((this.trdAngle - 90) * Math.PI) / 180;
 
+    // Sweep trail
     const trailLen = Math.PI * 0.35;
     ctx.beginPath();
     ctx.moveTo(cx, cy);
@@ -332,31 +456,7 @@ export class ModeRadarComponent implements OnInit, OnDestroy {
     ctx.fillText('TRADITIONAL ROTATING SWEEP', cx, H - 6);
   }
 
-  private drawBeamformingFallback(): void {
-    const canvas = this.bfCanvasRef?.nativeElement;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const W = (canvas.width = canvas.offsetWidth || 360);
-    const H = (canvas.height = canvas.offsetHeight || 360);
-    const cx = W / 2,
-      cy = H / 2;
-    const R = Math.min(W, H) / 2 - 16;
-
-    ctx.fillStyle = 'rgba(2,10,20,0.08)';
-    ctx.fillRect(0, 0, W, H);
-
-    this.drawRadarBg(ctx, cx, cy, R, '#0a1420', '#1a73e8');
-    this.drawTargetBlips(ctx, cx, cy, R, true);
-
-    ctx.fillStyle = 'rgba(26,115,232,0.7)';
-    ctx.font = 'bold 9px IBM Plex Mono, monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('PHASED ARRAY BEAMFORMING', cx, H - 6);
-  }
-
-  // ── Shared radar drawing helpers ───────────────────────────────
+  // ── Shared helpers ─────────────────────────────────────────────
 
   private toCartesian(t: RadarTarget) {
     const r = t.range * this.maxRangeM;
@@ -378,13 +478,11 @@ export class ModeRadarComponent implements OnInit, OnDestroy {
     bgColor: string,
     lineColor: string,
   ): void {
-    // Clip circle
     ctx.save();
     ctx.beginPath();
     ctx.arc(cx, cy, R, 0, Math.PI * 2);
     ctx.clip();
 
-    // Rings
     [0.25, 0.5, 0.75, 1].forEach((frac) => {
       ctx.beginPath();
       ctx.arc(cx, cy, R * frac, 0, Math.PI * 2);
@@ -393,7 +491,6 @@ export class ModeRadarComponent implements OnInit, OnDestroy {
       ctx.stroke();
     });
 
-    // Cross-hairs
     ctx.strokeStyle = lineColor + '20';
     ctx.lineWidth = 0.5;
     [-1, 0, 1].forEach((i) => {
@@ -407,14 +504,12 @@ export class ModeRadarComponent implements OnInit, OnDestroy {
 
     ctx.restore();
 
-    // Outer ring border
     ctx.beginPath();
     ctx.arc(cx, cy, R, 0, Math.PI * 2);
     ctx.strokeStyle = lineColor + '55';
     ctx.lineWidth = 1.5;
     ctx.stroke();
 
-    // Range labels
     ctx.fillStyle = lineColor + '55';
     ctx.font = '8px IBM Plex Mono, monospace';
     ctx.textAlign = 'right';
@@ -423,6 +518,10 @@ export class ModeRadarComponent implements OnInit, OnDestroy {
     });
   }
 
+  /**
+   * useBeam=true  → reads blipAge     / phased-array state
+   * useBeam=false → reads trdBlipAge  / traditional state
+   */
   private drawTargetBlips(
     ctx: CanvasRenderingContext2D,
     cx: number,
@@ -434,16 +533,19 @@ export class ModeRadarComponent implements OnInit, OnDestroy {
       const angleRad = ((tgt.angle - 90) * Math.PI) / 180;
       const tx = cx + tgt.range * R * Math.cos(angleRad);
       const ty = cy + tgt.range * R * Math.sin(angleRad);
-      const freshness = Math.max(0, 1 - tgt.blipAge / 150);
-      const alpha = useBeam ? freshness : Math.max(0, 1 - tgt.blipAge / 80);
+
+      const age = useBeam ? tgt.blipAge : tgt.trdBlipAge;
+      const fadeFrames = useBeam ? 150 : 200;
+      const alpha = Math.max(0, 1 - age / fadeFrames);
 
       if (alpha < 0.02) return;
 
       const color = useBeam ? '#64c8ff' : '#a0ffa0';
+      // Blip radius scales with RCS — bigger body = bigger blip
+      const radius = 3 + tgt.rcs * 0.25;
 
-      // Blip
       ctx.beginPath();
-      ctx.arc(tx, ty, 4 + tgt.rcs * 0.3, 0, Math.PI * 2);
+      ctx.arc(tx, ty, radius, 0, Math.PI * 2);
       ctx.fillStyle =
         color +
         Math.round(alpha * 200)
@@ -458,21 +560,20 @@ export class ModeRadarComponent implements OnInit, OnDestroy {
       ctx.lineWidth = 1;
       ctx.stroke();
 
-      // Ring ping when freshly detected
-      if (tgt.blipAge < 20) {
-        const pingR = tgt.blipAge * 2;
+      // Ping ring on fresh detection
+      if (age < 20) {
+        const pingR = age * 2;
         ctx.beginPath();
         ctx.arc(tx, ty, pingR, 0, Math.PI * 2);
         ctx.strokeStyle =
           color +
-          Math.round((1 - tgt.blipAge / 20) * 200)
+          Math.round((1 - age / 20) * 200)
             .toString(16)
             .padStart(2, '0');
         ctx.lineWidth = 1.5;
         ctx.stroke();
       }
 
-      // Label
       if (alpha > 0.2) {
         ctx.fillStyle =
           color +
