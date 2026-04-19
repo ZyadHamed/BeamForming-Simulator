@@ -48,6 +48,7 @@ class ElementInput(BaseModel):
     time_delay: float
     intensity: float
     enabled: bool
+    apodization_weight: float = 1.0
 
 class BeamSpecs(BaseModel):
     num_elements: int
@@ -174,9 +175,13 @@ class RadarSetupRequest(BaseModel):
     frequency_mhz   : float
     geometry         : Literal['linear', 'curved', 'phased'] = 'curved'
     curvature_radius : float = 60.0
+    steering_angle   : float = 0.0
+    focus_depth      : float = 0.0
     snr              : float = 60.0
     apodization      : Literal['none', 'hanning', 'hamming', 'blackman', 'kaiser', 'tukey'] = 'none'
     noise_floor_dbm  : float = -90.0
+    wave_speed       : float = 300000.0
+    elements         : List[ElementInput] = []
 
 class RadarTargetDTO(BaseModel):
     target_id  : str
@@ -202,26 +207,45 @@ def radar_setup(req: RadarSetupRequest):
     """
     global active_radar
 
-    elements = [
-        ProbeElement(
-            element_id=f"el_{i}", label=f"E{i}", color="#ea4335",
-            frequency=req.frequency_mhz, phase_shift=0.0,
-            time_delay=0.0, intensity=100.0, enabled=True
-        ) for i in range(req.num_elements)
-    ]
+    if req.elements:
+        elements = [
+            ProbeElement(
+                element_id=el.element_id,
+                label=el.label,
+                color=el.color,
+                frequency=el.frequency,
+                phase_shift=el.phase_shift,
+                time_delay=el.time_delay,
+                intensity=el.intensity,
+                enabled=el.enabled,
+                apodization_weight=el.apodization_weight,
+            ) for el in req.elements
+        ]
+    else:
+        elements = [
+            ProbeElement(
+                element_id=f"el_{i}", label=f"E{i}", color="#ea4335",
+                frequency=req.frequency_mhz, phase_shift=0.0,
+                time_delay=0.0, intensity=100.0, enabled=True
+            ) for i in range(req.num_elements)
+        ]
     config = ArrayConfig(
         elements=elements,
-        steering_angle=0.0,
-        focus_depth=0.0,
+        steering_angle=req.steering_angle,
+        focus_depth=req.focus_depth,
         element_spacing=req.element_spacing,
         geometry=req.geometry,
         curvature_radius=req.curvature_radius,
         num_elements=req.num_elements,
         snr=req.snr,
         apodization_window=req.apodization,
-        wave_speed=300000.0
+        kaiser_beta=14.0,
+        tukey_alpha=0.5,
+        wave_speed=req.wave_speed
     )
-    config.apply_apodization()
+    # Preserve frontend-provided apodization weights when available.
+    if not req.elements:
+        config.apply_apodization()
 
     environment = RadarEnvironment(
         targets=[],

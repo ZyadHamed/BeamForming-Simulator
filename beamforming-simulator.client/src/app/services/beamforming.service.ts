@@ -40,6 +40,33 @@ export interface BeamformRequest {
   sampleRate?: number;
 }
 
+export interface RadarElementInput {
+  element_id: string;
+  label: string;
+  color: string;
+  frequency: number;
+  phase_shift: number;
+  time_delay: number;
+  intensity: number;
+  enabled: boolean;
+  apodization_weight: number;
+}
+
+export interface RadarSetupRequest {
+  num_elements: number;
+  element_spacing: number;
+  frequency_mhz: number;
+  geometry: string;
+  curvature_radius: number;
+  steering_angle: number;
+  focus_depth: number;
+  snr: number;
+  apodization: string;
+  noise_floor_dbm: number;
+  wave_speed: number;
+  elements: RadarElementInput[];
+}
+
 // ── Environment switch ─────────────────────────────────────────────
 const USE_MOCK = false; // ← flip to false once backend is live
 const API_BASE = ''; // ← configure to match your backend
@@ -107,16 +134,7 @@ export class BeamformingService {
     return of(null as any);
   }
 
-  setupRadar(req: {
-    num_elements: number;
-    element_spacing: number;
-    frequency_mhz: number;
-    geometry: string;
-    curvature_radius: number;
-    snr: number;
-    apodization: string;
-    noise_floor_dbm: number;
-  }): Observable<{ message: string }> {
+  setupRadar(req: RadarSetupRequest): Observable<{ message: string }> {
     return this.http.post<{ message: string }>(`${API_BASE}/radar/setup`, req);
   }
 

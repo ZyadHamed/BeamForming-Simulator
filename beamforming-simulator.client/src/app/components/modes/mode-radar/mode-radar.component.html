@@ -7,19 +7,17 @@
     <!-- ── Scan controls ──────────────────────────────────────── -->
     <div class="ctrl-section">
       <div class="section-label">Scan Parameters</div>
-
-      <!--
-        BEAM WIDTH is now physics-derived: HPBW = 0.886·λ/(N·d).
-        The user widens/narrows the beam by changing the number of
-        array elements in the Phased Array panel below.
-        More elements → narrower beam → accurate size estimation.
-        Fewer elements → wider beam → fast broad scan.
-      -->
       <div class="ctrl-group">
-        <label class="ctrl-label">
-          Beam Width
-          <span class="val">{{ physicalBeamWidthDeg | number: '1.1-1' }}°</span>
-        </label>
+        <label class="ctrl-label">Sweep Mode</label>
+        <div class="toggle-row"></div>
+      </div>
+
+      <div
+        class="ctrl-group"
+        style="flex-direction: row; align-items: center; justify-content: space-between"
+      >
+        <label class="ctrl-label" style="margin-bottom: 0">Show Range Bins (Backend Data)</label>
+        <input type="checkbox" [(ngModel)]="showRangeBins" style="cursor: pointer" />
       </div>
 
       <div class="ctrl-group">
@@ -40,7 +38,7 @@
       <div class="ctrl-group">
         <label class="ctrl-label">
           Scan Range
-          <span class="val">{{ scanRange * 100 | number: '1.0-0' }} km</span>
+          <span class="val">{{ scanRange * maxRangeKm | number: '1.0-0' }} km</span>
         </label>
         <input
           type="range"
@@ -149,7 +147,9 @@
                 [ngModel]="tgt.range"
                 (ngModelChange)="onRangeChange(tgt.id, $event)"
               />
-              <span class="ctrl-hint val-sm">{{ tgt.range * 100 | number: '1.0-0' }}km</span>
+              <span class="ctrl-hint val-sm"
+                >{{ tgt.range * maxRangeKm | number: '1.0-0' }} km</span
+              >
             </div>
 
             <!-- Size / RCS -->

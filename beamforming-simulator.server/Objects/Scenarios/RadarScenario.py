@@ -40,7 +40,8 @@ class RadarScenario:
         num_range_bins = 128
         ranges_m     = np.linspace(0.1, max_range_m, num_range_bins)
 
-        Pt_dbm       = 60.0
+        # Boost base transmit power to 100 dBm (10 Megawatt peak, standard for long-range surveillance)
+        Pt_dbm = 100.0 
         sweep_data   = []
         detections   = []
 
@@ -60,22 +61,29 @@ class RadarScenario:
                 if true_range > max_range_m:
                     continue
 
-                idx_a        = int(np.argmin(np.abs(
-                    np.array(beam_result.angles_deg) - true_angle_deg
-                )))
+                # FIX 1: Safely calculate angular distance handling 360° wrap-around
+                diffs = np.abs(np.array(beam_result.angles_deg) - true_angle_deg) % 360
+                diffs = np.minimum(diffs, 360 - diffs)
+                idx_a = int(np.argmin(diffs))
+                
                 antenna_gain_db = beam_result.beam_pattern_db[idx_a]
                 path_loss_db = 40.0 * np.log10(max(true_range, 0.1))
+                
                 Pr_dbm       = (Pt_dbm + 2 * antenna_gain_db
                                 + 10 * np.log10(max(target.rcs_sqm, 1e-6))
                                 - path_loss_db)
                 snr_db       = Pr_dbm - self.environment.noise_floor_dbm
 
-                if snr_db > 10.0:
+                # FIX 2: Lower the strict squelch gate to allow weak echoes through
+                if snr_db > -20.0:
                     idx_r = int(np.argmin(np.abs(ranges_m - true_range)))
-                    # Normalise SNR to 0-1 for intensity
-                    range_bins[idx_r] = min(1.0, snr_db / 60.0)
+                    
+                    # FIX 3: Convert SNR to a linear voltage scale so the frontend can auto-scale it
+                    linear_intensity = 10 ** (snr_db / 20.0)
+                    range_bins[idx_r] = max(range_bins[idx_r], linear_intensity)
 
-                    if antenna_gain_db > -3.0:
+                    # Only register a hard "Detection Blip" if it's near the center of the main lobe
+                    if antenna_gain_db > -3.0 and snr_db > 5.0:
                         detections.append(RadarDetection(
                             target_id  = target.target_id,
                             range_m    = round(true_range, 1),

@@ -27,7 +27,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
 import { ProbeArrayComponent } from '../../probe-array/probe-array.component';
-import { BeamformingService } from '../../../services/beamforming.service';
+import { BeamformingService, RadarSetupRequest } from '../../../services/beamforming.service';
 import {
   ArrayConfig,
   makeDefaultArrayConfig,
@@ -42,7 +42,7 @@ import {
 interface RadarTarget {
   id: string;
   angle: number; // degrees, 0–360 (north = 0, clockwise)
-  range: number; // 0–1 fraction of maxRangeM
+  range: number; // 0–1 fraction of maxRangeKm
   rcs: number; // radar cross-section proxy, 1–20 m²
   label: string;
   // Phased-array detection state
@@ -70,21 +70,28 @@ export class ModeRadarComponent implements OnInit, OnDestroy {
   targets: RadarTarget[] = [];
   scanAngle: number = 0;
   scanSpeed: number = 1.2; // °/frame
-  scanRange: number = 1; // 0–1 of maxRangeM
+  scanRange: number = 1; // 0–1 of maxRangeKm
   scanDirection: number = 1;
   sweepMode: 'sector' | 'full' = 'full';
   sectorMin: number = -60;
   sectorMax: number = 60;
   detectedCount: number = 0;
+  showRangeBins: boolean = true;
 
   // ── Private state ─────────────────────────────────────────────
   private trdAngle: number = 0;
   private animId: number = 0;
   private t: number = 0;
   private radarReady: boolean = false;
-  readonly maxRangeM = 100; // km displayed as km, stored as fraction
+  private backendBusy: boolean = false;
+  private lastBackendAngle: number = 0;
+  private lastRequestTime: number = 0;
+  readonly maxRangeKm = 100; // km displayed as km, stored as km
   private readonly trdScanSpeed = 0.6; // fixed mechanical speed °/frame
   private readonly trdBeamWidth = 20; // fixed wide mechanical beam °
+  private sweepVisuals: { angle_deg: number; range_bins: number[]; age: number }[] = [];
+
+  private hasLoggedBins = false; // To fix something
 
   // ── Physics: Half-Power Beam Width ────────────────────────────
   //
@@ -103,11 +110,11 @@ export class ModeRadarComponent implements OnInit, OnDestroy {
     const freqMHz = this.arrayConfig.elements[0]?.frequency ?? 9500;
     const f_hz = freqMHz * 1e6; // MHz → Hz
     const lambda = 3e8 / f_hz; // metres
-    const N = Math.max(this.arrayConfig.numElements, 2);
-    // elementSpacing is in mm in this codebase (radar preset uses ~15 mm → λ/2 at 10 GHz)
-    // If your ArrayConfig stores it in metres, remove the / 1000.
+    const enabledElements = this.arrayConfig.elements.filter((el) => el.enabled).length;
+    const N = Math.max(enabledElements, 1);
     const d = this.arrayConfig.elementSpacing / 1000;
-    const hpbw_rad = (0.886 * lambda) / (N * d);
+    const aperture = Math.max((N - 1) * d, d);
+    const hpbw_rad = (0.886 * lambda) / aperture;
     return Math.min(90, Math.max(1, (hpbw_rad * 180) / Math.PI));
   }
 
@@ -175,25 +182,14 @@ export class ModeRadarComponent implements OnInit, OnDestroy {
     this.startAnimation();
 
     // Initialise backend; local detection runs regardless
-    this.beamSvc
-      .setupRadar({
-        num_elements: this.arrayConfig.numElements,
-        element_spacing: this.arrayConfig.elementSpacing,
-        frequency_mhz: this.arrayConfig.elements[0]?.frequency ?? 9.5,
-        geometry: this.arrayConfig.geometry,
-        curvature_radius: this.arrayConfig.curvatureRadius,
-        snr: this.arrayConfig.snr,
-        apodization: this.arrayConfig.apodizationWindow,
-        noise_floor_dbm: -90,
-      })
-      .subscribe({
-        next: () => {
-          this.radarReady = true;
-        },
-        error: (e) => {
-          console.warn('Radar setup failed – local-only mode:', e);
-        },
-      });
+    this.beamSvc.setupRadar(this.buildRadarSetupRequest(this.arrayConfig)).subscribe({
+      next: () => {
+        this.radarReady = true;
+      },
+      error: (e) => {
+        console.warn('Radar setup failed – local-only mode:', e);
+      },
+    });
   }
 
   ngOnDestroy(): void {
@@ -229,26 +225,15 @@ export class ModeRadarComponent implements OnInit, OnDestroy {
     // (frequency, phase, apodization) would tear down the backend session
     // while the child probe-array component is mid-interaction, causing
     // its sliders to lose state. Only re-setup if structural params changed.
-    this.beamSvc
-      .setupRadar({
-        num_elements: cfg.numElements,
-        element_spacing: cfg.elementSpacing,
-        frequency_mhz: cfg.elements[0]?.frequency ?? 9.5,
-        geometry: cfg.geometry,
-        curvature_radius: cfg.curvatureRadius,
-        snr: cfg.snr,
-        apodization: cfg.apodizationWindow,
-        noise_floor_dbm: -90,
-      })
-      .subscribe({
-        next: () => {
-          this.radarReady = true;
-          this.cdr.markForCheck();
-        },
-        error: (e) => {
-          console.warn('Radar re-setup failed:', e);
-        },
-      });
+    this.beamSvc.setupRadar(this.buildRadarSetupRequest(cfg)).subscribe({
+      next: () => {
+        this.radarReady = true;
+        this.cdr.markForCheck();
+      },
+      error: (e) => {
+        console.warn('Radar re-setup failed:', e);
+      },
+    });
   }
 
   addTarget(): void {
@@ -274,6 +259,33 @@ export class ModeRadarComponent implements OnInit, OnDestroy {
   removeTarget(id: string): void {
     this.targets = this.targets.filter((t) => t.id !== id);
     this.cdr.markForCheck();
+  }
+
+  private buildRadarSetupRequest(cfg: ArrayConfig): RadarSetupRequest {
+    return {
+      num_elements: cfg.numElements,
+      element_spacing: cfg.elementSpacing,
+      frequency_mhz: cfg.elements[0]?.frequency ?? 9.5,
+      geometry: cfg.geometry,
+      curvature_radius: cfg.curvatureRadius,
+      steering_angle: cfg.steeringAngle,
+      focus_depth: cfg.focusDepth,
+      snr: cfg.snr,
+      apodization: cfg.apodizationWindow,
+      noise_floor_dbm: -90,
+      wave_speed: 300000.0,
+      elements: cfg.elements.map((el) => ({
+        element_id: el.id,
+        label: el.label,
+        color: el.color,
+        frequency: el.frequency,
+        phase_shift: el.phaseShift,
+        time_delay: el.timeDelay,
+        intensity: el.intensity,
+        enabled: el.enabled,
+        apodization_weight: el.apodizationWeight,
+      })),
+    };
   }
 
   /** RCS slider — immutable update so trackBy remains stable */
@@ -305,8 +317,13 @@ export class ModeRadarComponent implements OnInit, OnDestroy {
         this.checkLocalPhasedArrayDetections();
         this.checkTraditionalDetections();
 
-        // Backend enrichment every 6 frames (fires only when backend is ready)
-        if (this.t % 6 === 0) this.requestBackendScan();
+        const now = Date.now();
+        // Request max ~4 times per second to prevent socket exhaustion
+        if (this.radarReady && !this.backendBusy && now - this.lastRequestTime > 250) {
+          this.backendBusy = true;
+          this.lastRequestTime = now;
+          this.requestBackendScan();
+        }
 
         this.drawBeamformingCanvas();
         this.drawTraditionalCanvas();
@@ -339,6 +356,9 @@ export class ModeRadarComponent implements OnInit, OnDestroy {
       }
     }
     this.trdAngle = (this.trdAngle + this.trdScanSpeed) % 360;
+
+    this.sweepVisuals.forEach((s) => s.age++);
+    this.sweepVisuals = this.sweepVisuals.filter((s) => s.age < 150); // Fades over 150 frames
   }
 
   // ── Local detection: phased array ─────────────────────────────
@@ -396,69 +416,53 @@ export class ModeRadarComponent implements OnInit, OnDestroy {
   private requestBackendScan(): void {
     if (!this.radarReady) return;
 
-    const bw = this.physicalBeamWidthDeg;
-    // Nyquist on the beam: sample at ≤ HPBW/2 steps within the illuminated arc.
-    // numLines = arc_span / (HPBW/2).  Arc span = bw, step = bw/2 → numLines = 2.
-    // We want at least 4 lines and at most 32 for performance.
-    // Better: use a fixed angular step of 0.5° within the beam arc.
-    const angularStep = Math.max(0.5, bw / 16);
-    const numLines = Math.min(32, Math.max(4, Math.round(bw / angularStep)));
+    let startAngle = this.lastBackendAngle;
+    let endAngle = this.scanAngle;
+
+    // Handle 360 wrap-around safely so we don't scan backwards
+    if (endAngle < startAngle && startAngle - endAngle > 180) endAngle += 360;
+    if (startAngle < endAngle && endAngle - startAngle > 180) startAngle += 360;
+
+    const diff = Math.abs(endAngle - startAngle);
+
+    // If completely stationary, just scan the immediate beam width
+    if (diff < 1) {
+      startAngle = this.scanAngle - this.physicalBeamWidthDeg / 2;
+      endAngle = this.scanAngle + this.physicalBeamWidthDeg / 2;
+    }
+
+    // Request roughly 1 line per degree to keep backend load light but resolution high
+    const numLines = Math.max(4, Math.min(45, Math.round(diff)));
 
     this.beamSvc
       .scanRadar({
-        start_angle: (this.scanAngle - bw / 2 + 360) % 360,
-        end_angle: (this.scanAngle + bw / 2 + 360) % 360,
+        start_angle: startAngle, // Let Python's trig functions handle angles > 360
+        end_angle: endAngle,
         num_lines: numLines,
-        max_range_m: this.scanRange * this.maxRangeM,
+        max_range_m: this.scanRange * this.maxRangeKm * 1000,
         targets: this.targets.map((t) => this.toCartesian(t)),
       })
-      .subscribe((result) => this.applyBackendResult(result));
+      .subscribe({
+        next: (result) => {
+          this.applyBackendResult(result);
+          // Only update the last processed angle upon success
+          this.lastBackendAngle = endAngle % 360;
+          this.backendBusy = false;
+        },
+        error: (err) => {
+          console.warn('Backend scan failed', err);
+          this.backendBusy = false;
+        },
+      });
   }
 
   private applyBackendResult(result: {
     sweep_data: { angle_deg: number; range_bins: number[] }[];
     detections: any[];
   }): void {
-    const canvas = this.bfCanvasRef?.nativeElement;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const W = canvas.width || 360;
-    const H = canvas.height || 360;
-    const cx = W / 2,
-      cy = H / 2;
-    const R = Math.min(W, H) / 2 - 16;
-    const halfRad = ((this.physicalBeamWidthDeg / 2) * Math.PI) / 180;
-
-    // Paint SNR-intensity arc slices from the backend sweep
     result.sweep_data.forEach((line) => {
-      const angleRad = ((line.angle_deg - 90) * Math.PI) / 180;
-      const numBins = line.range_bins.length;
-
-      line.range_bins.forEach((intensity, binIdx) => {
-        if (intensity < 0.01) return;
-        const r0 = (binIdx / numBins) * R;
-        const r1 = ((binIdx + 1) / numBins) * R;
-
-        ctx.beginPath();
-        ctx.moveTo(cx + r0 * Math.cos(angleRad - halfRad), cy + r0 * Math.sin(angleRad - halfRad));
-        ctx.arc(cx, cy, r1, angleRad - halfRad, angleRad + halfRad);
-        ctx.arc(cx, cy, r0, angleRad + halfRad, angleRad - halfRad, true);
-        ctx.closePath();
-        ctx.fillStyle = `rgba(26,115,232,${(intensity * 0.85).toFixed(3)})`;
-        ctx.fill();
-      });
+      this.sweepVisuals.push({ angle_deg: line.angle_deg, range_bins: line.range_bins, age: 0 });
     });
-
-    // Overlay grid and blips on top of intensity data
-    this.drawRadarBg(ctx, cx, cy, R, '#0a1420', '#1a73e8');
-    this.drawTargetBlips(ctx, cx, cy, R, true);
-
-    ctx.fillStyle = 'rgba(26,115,232,0.7)';
-    ctx.font = 'bold 9px IBM Plex Mono, monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('PHASED ARRAY BEAMFORMING', cx, H - 6);
 
     // Merge backend detections into local target state
     const detectedIds = new Set(result.detections.map((d: any) => d.target_id));
@@ -492,7 +496,7 @@ export class ModeRadarComponent implements OnInit, OnDestroy {
     ctx.fillStyle = 'rgba(2,10,20,0.08)';
     ctx.fillRect(0, 0, W, H);
 
-    this.drawRadarBg(ctx, cx, cy, R, '#0a1420', '#1a73e8');
+    this.drawRadarBg(ctx, cx, cy, R, '#0a1420', '#281ae8');
 
     // Beam cone
     const angleRad = ((this.scanAngle - 90) * Math.PI) / 180;
@@ -537,6 +541,49 @@ export class ModeRadarComponent implements OnInit, OnDestroy {
     const lx = cx + (R + 12) * Math.cos(angleRad);
     const ly = cy + (R + 12) * Math.sin(angleRad);
     ctx.fillText(`${this.scanAngle.toFixed(0)}°`, lx, ly);
+
+    if (this.showRangeBins) {
+      const halfRad = ((this.physicalBeamWidthDeg / 2) * Math.PI) / 180;
+
+      this.sweepVisuals.forEach((sweep) => {
+        const angleRad = ((sweep.angle_deg - 90) * Math.PI) / 180;
+        const numBins = sweep.range_bins.length;
+        const alphaFade = Math.max(0, 1 - sweep.age / 150);
+
+        if (alphaFade > 0 && numBins > 0) {
+          // 1. Find the TRUE maximum signal in this beam
+          const rawMax = Math.max(...sweep.range_bins);
+
+          // 2. If the beam hit nothing but empty space, the max will be 0
+          // (or extremely tiny floating-point dust). Skip empty beams.
+          if (rawMax <= 1e-30) return;
+
+          sweep.range_bins.forEach((intensity, binIdx) => {
+            // 3. Normalize relative to the true peak, even if that peak is 1e-15
+            const normalized = intensity / rawMax;
+
+            // 4. Draw only the reflection, ignoring the noise floor of this specific beam
+            if (normalized < 0.05) return;
+
+            const r0 = (binIdx / numBins) * R;
+            const r1 = ((binIdx + 1) / numBins) * R;
+
+            ctx.beginPath();
+            ctx.moveTo(
+              cx + r0 * Math.cos(angleRad - halfRad),
+              cy + r0 * Math.sin(angleRad - halfRad),
+            );
+            ctx.arc(cx, cy, r1, angleRad - halfRad, angleRad + halfRad);
+            ctx.arc(cx, cy, r0, angleRad + halfRad, angleRad - halfRad, true);
+            ctx.closePath();
+
+            // Render in glowing neon cyan
+            ctx.fillStyle = `rgba(0, 255, 170, ${(normalized * alphaFade).toFixed(3)})`;
+            ctx.fill();
+          });
+        }
+      });
+    }
 
     this.drawTargetBlips(ctx, cx, cy, R, true);
 
@@ -601,7 +648,7 @@ export class ModeRadarComponent implements OnInit, OnDestroy {
   // ── Shared canvas helpers ──────────────────────────────────────
 
   private toCartesian(t: RadarTarget) {
-    const r = t.range * this.maxRangeM;
+    const r = t.range * this.maxRangeKm * 1000;
     const rad = (t.angle * Math.PI) / 180;
     return {
       target_id: t.id,
@@ -732,7 +779,7 @@ export class ModeRadarComponent implements OnInit, OnDestroy {
             .toString(16)
             .padStart(2, '0');
         ctx.fillText(`RCS ${tgt.rcs.toFixed(0)} m²`, tx + 6, ty + 7);
-        ctx.fillText(`${(tgt.range * this.maxRangeM).toFixed(0)} km`, tx + 6, ty + 16);
+        ctx.fillText(`${(tgt.range * this.maxRangeKm).toFixed(0)} km`, tx + 6, ty + 16);
       }
     });
   }
