@@ -1,4 +1,4 @@
-﻿import os
+import os
 import base64
 import numpy as np
 from pydantic import BaseModel
@@ -50,6 +50,7 @@ class ElementInput(BaseModel):
     time_delay: float
     intensity: float
     enabled: bool
+    apodization_weight: float = 1.0
 
 class BeamSpecs(BaseModel):
     num_elements: int
@@ -166,11 +167,58 @@ def update_users_and_evaluate(req: UserUpdateRequest):
     
     return result
 
-# --- Radar State ---
+# ─────────────────────────────────────────────────────────────────────────────
+# Radar – server-side state
+# The active RadarScenario instance is kept alive between requests so that
+# target updates during a scan session are cheap (no re-instantiation).
+# ─────────────────────────────────────────────────────────────────────────────
 active_radar: Optional[RadarScenario] = None
 
-# --- Radar DTOs ---
+
+# ── Radar DTOs (API contract) ─────────────────────────────────────────────────
+# These Pydantic models are purely for HTTP serialisation/validation.
+# They mirror the domain value objects (RadarWaveform, RadarDetectionConfig,
+# RadarEnvironment) but are intentionally separate so the API contract is
+# decoupled from internal physics class structure.
+
 class RadarSetupRequest(BaseModel):
+    """
+    Sent once when the radar mode loads, or whenever the array or waveform
+    configuration changes.  Target positions are supplied per-scan, not here.
+
+    Array parameters (7 controllable parameters per the spec)
+    ----------------------------------------------------------
+    num_elements     : number of array elements           (beam width control)
+    element_spacing  : inter-element spacing, mm          (grating lobe control)
+    frequency_mhz    : carrier frequency, MHz             (range / resolution)
+    geometry         : 'linear' | 'curved' | 'phased'
+    apodization      : window function for side-lobe reduction
+    snr              : simulation SNR applied to beam patterns, dB  (0–1000)
+    steering_angle   : initial boresight, degrees
+
+    Waveform parameters (encapsulated as RadarWaveform inside the scenario)
+    -----------------------------------------------------------------------
+    pt_dbm           : peak transmit power, dBm
+                         50 dBm =   100 W  (short-range / airborne)
+                         70 dBm =  10 kW   (default, S-band search radar)
+                         90 dBm =   1 GW   (long-range surveillance)
+    prf_hz           : pulse repetition frequency, Hz
+                       max unambiguous range = c / (2·PRF)
+    pulse_width_us   : pulse width, µs;  range resolution = c·τ/2
+
+    Environment parameters (encapsulated as RadarEnvironment)
+    ----------------------------------------------------------
+    noise_floor_dbm  : receiver thermal noise, dBm  (typically −100 to −110)
+    clutter_floor_dbm: peak ground-clutter at 1 km reference range, dBm
+                       (set to −200 to disable; set to −60 for urban clutter)
+    clutter_range_exp: clutter fall-off, dB/decade  (−20 surface, −40 volume)
+
+    Detector parameters (encapsulated as RadarDetectionConfig)
+    ----------------------------------------------------------
+    cfar_guard_cells : guard cells each side of the CUT in CA-CFAR
+    cfar_ref_cells   : reference cells each side in CA-CFAR
+    cfar_pfa         : desired probability of false alarm (e.g. 1e-4)
+    """
     # ── Array geometry ─────────────────────────────────────────────────────
     num_elements     : int
     element_spacing  : float                                          # mm
@@ -180,7 +228,8 @@ class RadarSetupRequest(BaseModel):
     steering_angle   : float  = 0.0
     focus_depth      : float  = 0.0
     snr              : float  = 60.0                                  # dB, 0–1000
-    apodization      : Literal['none', 'hanning', 'hamming', 'blackman', 'kaiser', 'tukey'] = 'none'
+    apodization      : Literal['none', 'hanning', 'hamming',
+                                'blackman', 'kaiser', 'tukey'] = 'none'
     elements         : List[ElementInput] = []
 
     # ── Waveform (maps to RadarWaveform value object) ──────────────────────
@@ -198,14 +247,41 @@ class RadarSetupRequest(BaseModel):
     cfar_ref_cells   : int    = 8
     cfar_pfa         : float  = 1e-4
 
+
 class RadarTargetDTO(BaseModel):
-    target_id  : str
-    x_m        : float
-    y_m        : float
+    """
+    A single target in the radar scene (up to 5 per the spec).
+
+    Coordinates are in metres, North-up convention:
+        x_m = East component  (right on PPI)
+        y_m = North component (up   on PPI)
+
+    velocity_m_s : radial component toward the radar (positive = approaching).
+    rcs_sqm      : radar cross section, m².  Controls detection range and blip
+                   size.  Larger bodies have higher RCS:
+                       person ~1 m², car ~10 m², aircraft ~2–20 m².
+    """
+    target_id   : str
+    x_m         : float
+    y_m         : float
     velocity_m_s: float = 0.0
-    rcs_sqm    : float
+    rcs_sqm     : float
+
 
 class RadarScanRequest(BaseModel):
+    """
+    Parameters for a single PPI sector scan request.
+
+    Angles are clockwise-from-North degrees (matching the target bearing
+    convention).  A full 360° electronic sweep:
+        start_angle=0, end_angle=360, num_lines=360
+
+    A narrow-beam size-estimation scan:
+        start_angle=-10, end_angle=10, num_lines=40 (finer angular step)
+
+    num_range_bins  : range-profile depth returned per beam line (default 128).
+    max_range_m     : instrumented range gate in metres.
+    """
     start_angle    : float
     end_angle      : float
     num_lines      : int   = 36
@@ -213,9 +289,12 @@ class RadarScanRequest(BaseModel):
     num_range_bins : int   = 128
     targets        : List[RadarTargetDTO]
 
+
 class RadarInfoResponse(BaseModel):
     """
     Derived radar parameters echoed back after /radar/setup.
+    The frontend uses these to populate an info panel without recomputing
+    physics locally.
     """
     num_elements           : int
     carrier_freq_hz        : float
@@ -228,21 +307,16 @@ class RadarInfoResponse(BaseModel):
     prf_hz                 : float
     pulse_width_us         : float
     noise_floor_dbm        : float
-    
-    # --- Added for UI Antenna Pattern Plotting ---
-    beam_pattern           : List[float]
-    angles_deg             : List[float]
-    beam_angle             : float
-    main_lobe_width        : float
-    side_lobe_level        : Optional[float]
 
-# --- Radar Endpoints ---
+
+# ── Radar endpoints ────────────────────────────────────────────────────────────
 
 def _build_array_config(req: RadarSetupRequest) -> ArrayConfig:
     """
     Private factory: translate a RadarSetupRequest into an ArrayConfig.
 
-    Extracted from the endpoint handler to keep the handler thin.
+    Extracted from the endpoint handler to keep the handler thin and to
+    make the construction logic unit-testable independently.
     """
     if req.elements:
         elements = [
@@ -255,7 +329,7 @@ def _build_array_config(req: RadarSetupRequest) -> ArrayConfig:
                 time_delay        = el.time_delay,
                 intensity         = el.intensity,
                 enabled           = el.enabled,
-                apodization_weight= getattr(el, 'apodization_weight', 1.0),
+                apodization_weight= el.apodization_weight,
             ) for el in req.elements
         ]
     else:
@@ -292,13 +366,23 @@ def _build_array_config(req: RadarSetupRequest) -> ArrayConfig:
 
     return config
 
+
 @app.post("/radar/setup", response_model=RadarInfoResponse)
 def radar_setup(req: RadarSetupRequest):
     """
     Instantiate (or replace) the active RadarScenario session.
 
     Called once when the radar page loads and again whenever the array
-    configuration, waveform, or detector parameters change.
+    configuration, waveform, or detector parameters change.  Internally
+    this constructs three encapsulated value objects:
+
+        RadarWaveform        — from pt_dbm, prf_hz, pulse_width_us
+        RadarEnvironment     — from noise_floor_dbm, clutter_*, targets=[]
+        RadarDetectionConfig — from cfar_guard_cells, cfar_ref_cells, cfar_pfa
+
+    These are injected into RadarScenario, which inherits from Scenario (ABC).
+    The scenario's get_scan_parameters() method is then used to populate the
+    response without duplicating property logic in the endpoint.
     """
     global active_radar
 
@@ -323,7 +407,9 @@ def radar_setup(req: RadarSetupRequest):
         pfa         = req.cfar_pfa,
     )
 
-    # RadarScenario inherits Scenario (ABC)
+    # RadarScenario inherits Scenario (ABC) and implements:
+    #   perform_default_scan() — full 360° PPI
+    #   get_scan_parameters()  — derived physics values for UI display
     active_radar = RadarScenario(
         config        = config,
         environment   = environment,
@@ -332,9 +418,6 @@ def radar_setup(req: RadarSetupRequest):
     )
 
     params = active_radar.get_scan_parameters()
-    
-    # Compute the antenna's beam pattern so the UI can graph the lobes!
-    bf_result = config.compute_beamforming()
 
     return RadarInfoResponse(
         num_elements            = req.num_elements,
@@ -348,19 +431,38 @@ def radar_setup(req: RadarSetupRequest):
         prf_hz                  = params["prf_hz"],
         pulse_width_us          = params["pulse_width_us"],
         noise_floor_dbm         = params["noise_floor_dbm"],
-        
-        # --- NEW: Inject beamforming results ---
-        beam_pattern            = bf_result.beam_pattern_db,
-        angles_deg              = bf_result.angles_deg,
-        beam_angle              = bf_result.beam_angle,
-        main_lobe_width         = bf_result.main_lobe_width,
-        side_lobe_level         = bf_result.side_lobe_level
     )
+
 
 @app.post("/radar/scan")
 def radar_scan(req: RadarScanRequest):
     """
     Execute a PPI sector scan and return sweep data plus CFAR detections.
+
+    The response shape:
+
+        sweep_data : list of beam lines
+            angle_deg   – steering angle of this beam line (degrees)
+            range_bins  – 128 log-compressed, normalised [0, 1] power values
+
+        detections : list of CFAR-confirmed blips
+            target_id    – matches the ID supplied in the request
+            range_m      – slant range at detection
+            angle_deg    – beam angle at detection
+            snr_db       – signal-to-noise ratio (dB)
+            estimated_rcs– RCS value from the request (m²)
+            doppler_m_s  – radial velocity estimate (m/s, + = approaching)
+
+    Target management
+    -----------------
+    The environment's target list is replaced atomically on every call.
+    This covers all three user actions from the spec:
+        • Add target  → include it in the targets list
+        • Move target → send updated x_m, y_m with the same target_id
+        • Delete target → omit it from the targets list
+        • Resize target → send updated rcs_sqm with the same target_id
+
+    The endpoint enforces the spec's 5-target maximum.
     """
     global active_radar
 
@@ -394,6 +496,40 @@ def radar_scan(req: RadarScanRequest):
         num_lines      = req.num_lines,
         max_range_m    = req.max_range_m,
         num_range_bins = req.num_range_bins,
+    )
+
+    return {
+        "sweep_data" : result.sweep_data,
+        "detections" : [vars(d) for d in result.detections],
+    }
+
+
+@app.post("/radar/default-scan")
+def radar_default_scan(
+    max_range_m:    float = 150_000.0,
+    num_lines:      int   = 360,
+    num_range_bins: int   = 128,
+):
+    """
+    Convenience endpoint that calls perform_default_scan() — the full 360°
+    electronic sweep using the current session targets and configuration.
+
+    This exposes the Scenario abstract method directly as an endpoint,
+    demonstrating the polymorphic design: the same endpoint pattern works
+    for every scenario type.
+    """
+    global active_radar
+
+    if active_radar is None:
+        raise HTTPException(
+            status_code = 400,
+            detail      = "Radar not initialized. Call POST /radar/setup first.",
+        )
+
+    result = active_radar.perform_default_scan(
+        max_range_m    = max_range_m,
+        num_lines      = num_lines,
+        num_range_bins = num_range_bins,
     )
 
     return {
@@ -493,4 +629,3 @@ async def calculate_from_elements(elements: List[ElementInput], steering_angle: 
     )
     
     return run_simulation(config)
-

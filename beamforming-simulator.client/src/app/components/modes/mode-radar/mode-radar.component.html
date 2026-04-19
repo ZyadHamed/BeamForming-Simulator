@@ -1,16 +1,7 @@
-<!-- ════════════════════════════════════════════════════════════════
-     ModeRadarComponent template
-     ════════════════════════════════════════════════════════════════ -->
 <div class="mode-layout">
-  <!-- ── Sidebar ──────────────────────────────────────────────── -->
   <aside class="mode-sidebar">
-    <!-- ── Scan controls ──────────────────────────────────────── -->
     <div class="ctrl-section">
       <div class="section-label">Scan Parameters</div>
-      <div class="ctrl-group">
-        <label class="ctrl-label">Sweep Mode</label>
-        <div class="toggle-row"></div>
-      </div>
 
       <div
         class="ctrl-group"
@@ -96,7 +87,90 @@
       </div>
     </div>
 
-    <!-- ── Targets ─────────────────────────────────────────────── -->
+    <div class="ctrl-section">
+      <div class="section-label">Hardware & Waveform</div>
+
+      <div class="ctrl-group">
+        <label class="ctrl-label">
+          TX Power (Pt) <span class="val">{{ txPower }} dBm</span>
+        </label>
+        <input
+          type="range"
+          class="styled-slider"
+          min="50"
+          max="90"
+          step="1"
+          [(ngModel)]="txPower"
+          (change)="onHardwareChange()"
+        />
+      </div>
+
+      <div class="ctrl-group">
+        <label class="ctrl-label">
+          Pulse Repetition <span class="val">{{ prfHz }} Hz</span>
+        </label>
+        <input
+          type="range"
+          class="styled-slider"
+          min="300"
+          max="3000"
+          step="100"
+          [(ngModel)]="prfHz"
+          (change)="onHardwareChange()"
+        />
+      </div>
+
+      <div class="ctrl-group">
+        <label class="ctrl-label">
+          Pulse Width <span class="val">{{ pulseWidthUs | number: '1.1-1' }} µs</span>
+        </label>
+        <input
+          type="range"
+          class="styled-slider"
+          min="0.1"
+          max="5.0"
+          step="0.1"
+          [(ngModel)]="pulseWidthUs"
+          (change)="onHardwareChange()"
+        />
+      </div>
+    </div>
+
+    <div class="ctrl-section" *ngIf="radarInfo">
+      <div class="section-label">Derived Parameters</div>
+
+      <div class="cmp-row" style="margin-bottom: 4px">
+        <span class="cmp-label" style="margin-bottom: 0; width: 120px">Array Gain:</span>
+        <span class="cmp-bf better">{{ radarInfo.array_gain_db | number: '1.1-1' }} dBi</span>
+      </div>
+
+      <div class="cmp-row" style="margin-bottom: 4px">
+        <span class="cmp-label" style="margin-bottom: 0; width: 120px">Range Resolution:</span>
+        <span class="cmp-bf better">{{ radarInfo.range_resolution_m | number: '1.1-1' }} m</span>
+      </div>
+
+      <div class="cmp-row" style="margin-bottom: 4px">
+        <span class="cmp-label" style="margin-bottom: 0; width: 120px">Max Unambiguous:</span>
+        <span class="cmp-bf better"
+          >{{ radarInfo.max_unambiguous_range_m / 1000 | number: '1.1-1' }} km</span
+        >
+      </div>
+
+      <div class="cmp-row" style="margin-bottom: 4px">
+        <span class="cmp-label" style="margin-bottom: 0; width: 120px">HPBW:</span>
+        <span class="cmp-bf better">{{ radarInfo.hpbw_deg | number: '1.1-1' }}°</span>
+      </div>
+
+      <div class="cmp-row">
+        <span class="cmp-label" style="margin-bottom: 0; width: 120px">Side Lobe Level:</span>
+        <span class="cmp-bf better">{{
+          radarInfo.side_lobe_level !== null
+            ? (radarInfo.side_lobe_level | number: '1.1-1') + ' dB'
+            : 'N/A'
+        }}</span>
+      </div>
+    </div>
+
     <div class="ctrl-section">
       <div class="section-label-row">
         <span class="section-label">Targets ({{ targets.length }}/5)</span>
@@ -107,77 +181,70 @@
 
       <div class="targets-list">
         <div class="target-row" *ngFor="let tgt of targets; trackBy: trackById">
-          <!-- Detection indicator dot -->
           <div
             class="tgt-indicator"
             [class.detected]="tgt.blipAge < 30 || tgt.trdBlipAge < 30"
           ></div>
-
           <div class="tgt-info">
-            <div class="tgt-header-row">
+            <div
+              class="tgt-header-row"
+              style="display: flex; justify-content: space-between; align-items: center"
+            >
               <span class="tgt-label">{{ tgt.label }}</span>
               <span class="tgt-status detected" *ngIf="tgt.blipAge < 30">LOCK</span>
               <button class="rm-btn" (click)="removeTarget(tgt.id)">✕</button>
             </div>
 
-            <!-- Angle (position around the radar) -->
-            <div class="rcs-row">
-              <span class="ctrl-hint">Angle</span>
+            <div style="margin-top: 4px">
+              <label class="ctrl-label" style="font-size: 9px">Angle</label>
               <input
                 type="range"
-                class="styled-slider rcs-slider"
+                class="styled-slider"
                 min="0"
                 max="359"
                 step="1"
                 [ngModel]="tgt.angle"
                 (ngModelChange)="onAngleChange(tgt.id, $event)"
               />
-              <span class="ctrl-hint val-sm">{{ tgt.angle | number: '1.0-0' }}°</span>
             </div>
 
-            <!-- Range (distance from origin) -->
-            <div class="rcs-row">
-              <span class="ctrl-hint">Range</span>
+            <div style="margin-top: 4px">
+              <label class="ctrl-label" style="font-size: 9px">Range</label>
               <input
                 type="range"
-                class="styled-slider rcs-slider"
-                min="0.1"
+                class="styled-slider"
+                min="0"
                 max="1"
                 step="0.01"
                 [ngModel]="tgt.range"
                 (ngModelChange)="onRangeChange(tgt.id, $event)"
               />
-              <span class="ctrl-hint val-sm"
-                >{{ tgt.range * maxRangeKm | number: '1.0-0' }} km</span
-              >
             </div>
 
-            <!-- Size / RCS -->
-            <div class="rcs-row">
-              <span class="ctrl-hint">Size</span>
+            <div style="margin-top: 4px">
+              <label class="ctrl-label" style="font-size: 9px">RCS (m²)</label>
               <input
                 type="range"
-                class="styled-slider rcs-slider"
+                class="styled-slider"
                 min="1"
                 max="20"
                 step="0.5"
                 [ngModel]="tgt.rcs"
                 (ngModelChange)="onRcsChange(tgt.id, $event)"
               />
-              <span class="ctrl-hint val-sm">{{ tgt.rcs | number: '1.0-0' }}m²</span>
             </div>
           </div>
         </div>
-
-        <div class="entity-empty" *ngIf="!targets.length">No targets — press + Add</div>
+        <div *ngIf="targets.length === 0" class="entity-empty">No targets active.</div>
       </div>
     </div>
 
-    <!-- ── Phased array config ─────────────────────────────────── -->
     <div class="sidebar-array-wrap">
       <div class="section-label" style="padding: 8px 12px 0">
         Phased Array
-        <span class="beam-note">↑ change N to widen/narrow beam</span>
+        <span class="beam-note" style="text-transform: none; float: right"
+          >↑ change N to widen/narrow beam</span
+        >
       </div>
       <app-probe-array
         [arrayConfig]="arrayConfig"
@@ -187,7 +254,6 @@
       ></app-probe-array>
     </div>
 
-    <!-- ── Detection meter ─────────────────────────────────────── -->
     <div class="detect-bar">
       <div class="detect-label">
         <span>Detections</span>
@@ -200,25 +266,17 @@
         ></div>
       </div>
     </div>
-
-    <!-- ── Beam azimuth readout ────────────────────────────────── -->
-    <div class="angle-display">
-      <span class="angle-val">{{ scanAngle | number: '1.0-0' }}°</span>
-      <span class="angle-sub">current beam azimuth</span>
-    </div>
   </aside>
 
-  <!-- ── Radar display panels ───────────────────────────────────── -->
   <main class="mode-main">
-    <div class="radar-row">
-      <!-- Phased-array beamforming -->
+    <div class="radar-row" style="flex: 1.5">
       <div class="radar-card bf">
         <div class="radar-header">
-          <div class="radar-status-dot active"></div>
-          <span class="radar-title">Phased Array Beamforming</span>
+          <div class="radar-status-dot"></div>
+          <span class="radar-title">Phased Array Simulator</span>
           <div class="radar-chips">
-            <span class="chip blue">{{ arrayConfig.numElements }} elements</span>
-            <span class="chip blue">{{ physicalBeamWidthDeg | number: '1.1-1' }}° HPBW</span>
+            <span class="chip blue">Electronic steer</span>
+            <span class="chip blue">Dynamic HPBW</span>
           </div>
         </div>
         <div class="radar-canvas-wrap">
@@ -226,16 +284,15 @@
         </div>
         <div class="radar-footer">
           <span class="footer-note">
-            Electronic steering via per-element phase delays · Narrow beam = finer size estimation
+            Beam synthesized by phase delays. Width ∝ 1/N. Detects using Range-Bin CA-CFAR.
           </span>
         </div>
       </div>
 
-      <!-- Traditional rotating sweep -->
       <div class="radar-card trd">
         <div class="radar-header">
-          <div class="radar-status-dot active green"></div>
-          <span class="radar-title">Traditional Rotating Sweep</span>
+          <div class="radar-status-dot green"></div>
+          <span class="radar-title">Legacy Radar</span>
           <div class="radar-chips">
             <span class="chip green">Mechanical scan</span>
             <span class="chip green">360° sweep</span>
@@ -246,18 +303,23 @@
         </div>
         <div class="radar-footer">
           <span class="footer-note">
-            Single rotating beam — no electronic steering, slower update rate
+            Single rotating beam — no electronic steering, slower update rate.
           </span>
         </div>
       </div>
+    </div>
 
-      <!-- Interference / constructive-destructive pattern -->
+    <div class="radar-row" style="flex: 1">
       <div class="radar-card interference">
         <div class="radar-header">
           <div class="radar-status-dot active"></div>
           <span class="radar-title">Interference Pattern</span>
           <div class="radar-chips">
-            <span class="chip amber">Element superposition</span>
+            <span
+              class="chip amber"
+              style="background: rgba(232, 168, 43, 0.2); color: rgba(255, 200, 100, 0.9)"
+              >Element superposition</span
+            >
           </div>
         </div>
         <div class="radar-canvas-wrap">
@@ -275,8 +337,24 @@
           </span>
         </div>
       </div>
+
+      <div class="radar-card" style="border-color: rgba(52, 168, 83, 0.4)">
+        <div class="radar-header">
+          <div class="radar-status-dot green"></div>
+          <span class="radar-title">Antenna Radiation Pattern</span>
+          <div class="radar-chips">
+            <span class="chip green">Beam Profile</span>
+          </div>
+        </div>
+        <div class="radar-canvas-wrap" style="padding: 15px">
+          <canvas #patternCanvas style="width: 100%; height: 100%; display: block"></canvas>
+        </div>
+        <div class="radar-footer">
+          <span class="footer-note">
+            Normalized dB gain vs Angle. Apodization shapes this beam to suppress side-lobes.
+          </span>
+        </div>
+      </div>
     </div>
-    <!-- /radar-row -->
   </main>
 </div>
-<!-- /mode-layout -->
