@@ -11,6 +11,7 @@ from Objects.Physics.RadarEnviroment import RadarEnvironment
 @dataclass
 class RadarDetection:
     """A 'blip' on the radar screen that crossed the detection threshold."""
+    target_id: str
     range_m: float
     angle_deg: float
     snr_db: float

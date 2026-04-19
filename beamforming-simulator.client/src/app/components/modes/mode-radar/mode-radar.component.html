@@ -4,23 +4,22 @@
 <div class="mode-layout">
   <!-- ── Sidebar ──────────────────────────────────────────────── -->
   <aside class="mode-sidebar">
-    <!-- Scan controls -->
+    <!-- ── Scan controls ──────────────────────────────────────── -->
     <div class="ctrl-section">
       <div class="section-label">Scan Parameters</div>
 
+      <!--
+        BEAM WIDTH is now physics-derived: HPBW = 0.886·λ/(N·d).
+        The user widens/narrows the beam by changing the number of
+        array elements in the Phased Array panel below.
+        More elements → narrower beam → accurate size estimation.
+        Fewer elements → wider beam → fast broad scan.
+      -->
       <div class="ctrl-group">
         <label class="ctrl-label">
           Beam Width
-          <span class="val">{{ beamWidth | number: '1.0-0' }}°</span>
+          <span class="val">{{ physicalBeamWidthDeg | number: '1.1-1' }}°</span>
         </label>
-        <input
-          type="range"
-          class="styled-slider"
-          min="5"
-          max="60"
-          step="5"
-          [(ngModel)]="beamWidth"
-        />
       </div>
 
       <div class="ctrl-group">
@@ -75,8 +74,7 @@
 
       <div class="ctrl-group" *ngIf="sweepMode === 'sector'">
         <label class="ctrl-label">
-          Sector Min
-          <span class="val">{{ sectorMin }}°</span>
+          Sector Min <span class="val">{{ sectorMin }}°</span>
         </label>
         <input
           type="range"
@@ -87,8 +85,7 @@
           [(ngModel)]="sectorMin"
         />
         <label class="ctrl-label" style="margin-top: 6px">
-          Sector Max
-          <span class="val">{{ sectorMax }}°</span>
+          Sector Max <span class="val">{{ sectorMax }}°</span>
         </label>
         <input
           type="range"
@@ -101,24 +98,61 @@
       </div>
     </div>
 
-    <!-- Targets -->
+    <!-- ── Targets ─────────────────────────────────────────────── -->
     <div class="ctrl-section">
       <div class="section-label-row">
-        <span class="section-label">Targets ({{ targets.length }})</span>
-        <button class="add-tgt-btn" (click)="addTarget()">+ Add</button>
+        <span class="section-label">Targets ({{ targets.length }}/5)</span>
+        <button class="add-tgt-btn" (click)="addTarget()" [disabled]="targets.length >= 5">
+          + Add
+        </button>
       </div>
 
       <div class="targets-list">
-        <div class="target-row" *ngFor="let tgt of targets">
+        <div class="target-row" *ngFor="let tgt of targets; trackBy: trackById">
+          <!-- Detection indicator dot -->
           <div
             class="tgt-indicator"
             [class.detected]="tgt.blipAge < 30 || tgt.trdBlipAge < 30"
           ></div>
+
           <div class="tgt-info">
-            <span class="tgt-label">{{ tgt.label }}</span>
-            <span class="tgt-meta"
-              >{{ tgt.angle | number: '1.0-0' }}° / {{ tgt.range * 100 | number: '1.0-0' }}km</span
-            >
+            <div class="tgt-header-row">
+              <span class="tgt-label">{{ tgt.label }}</span>
+              <span class="tgt-status detected" *ngIf="tgt.blipAge < 30">LOCK</span>
+              <button class="rm-btn" (click)="removeTarget(tgt.id)">✕</button>
+            </div>
+
+            <!-- Angle (position around the radar) -->
+            <div class="rcs-row">
+              <span class="ctrl-hint">Angle</span>
+              <input
+                type="range"
+                class="styled-slider rcs-slider"
+                min="0"
+                max="359"
+                step="1"
+                [ngModel]="tgt.angle"
+                (ngModelChange)="onAngleChange(tgt.id, $event)"
+              />
+              <span class="ctrl-hint val-sm">{{ tgt.angle | number: '1.0-0' }}°</span>
+            </div>
+
+            <!-- Range (distance from origin) -->
+            <div class="rcs-row">
+              <span class="ctrl-hint">Range</span>
+              <input
+                type="range"
+                class="styled-slider rcs-slider"
+                min="0.1"
+                max="1"
+                step="0.01"
+                [ngModel]="tgt.range"
+                (ngModelChange)="onRangeChange(tgt.id, $event)"
+              />
+              <span class="ctrl-hint val-sm">{{ tgt.range * 100 | number: '1.0-0' }}km</span>
+            </div>
+
+            <!-- Size / RCS -->
             <div class="rcs-row">
               <span class="ctrl-hint">Size</span>
               <input
@@ -127,21 +161,24 @@
                 min="1"
                 max="20"
                 step="0.5"
-                [(ngModel)]="tgt.rcs"
+                [ngModel]="tgt.rcs"
+                (ngModelChange)="onRcsChange(tgt.id, $event)"
               />
-              <span class="ctrl-hint">{{ tgt.rcs | number: '1.0-0' }}</span>
+              <span class="ctrl-hint val-sm">{{ tgt.rcs | number: '1.0-0' }}m²</span>
             </div>
           </div>
-          <span class="tgt-status detected" *ngIf="tgt.blipAge < 30">LOCK</span>
-          <button class="rm-btn" (click)="removeTarget(tgt.id)">✕</button>
         </div>
-        <div class="entity-empty" *ngIf="!targets.length">No targets placed</div>
+
+        <div class="entity-empty" *ngIf="!targets.length">No targets — press + Add</div>
       </div>
     </div>
 
-    <!-- Array config -->
+    <!-- ── Phased array config ─────────────────────────────────── -->
     <div class="sidebar-array-wrap">
-      <div class="section-label" style="padding: 8px 12px 0">Phased Array</div>
+      <div class="section-label" style="padding: 8px 12px 0">
+        Phased Array
+        <span class="beam-note">↑ change N to widen/narrow beam</span>
+      </div>
       <app-probe-array
         [arrayConfig]="arrayConfig"
         label="Radar Array"
@@ -150,7 +187,7 @@
       ></app-probe-array>
     </div>
 
-    <!-- Detection meter -->
+    <!-- ── Detection meter ─────────────────────────────────────── -->
     <div class="detect-bar">
       <div class="detect-label">
         <span>Detections</span>
@@ -164,39 +201,37 @@
       </div>
     </div>
 
-    <!-- Beam angle indicator -->
+    <!-- ── Beam azimuth readout ────────────────────────────────── -->
     <div class="angle-display">
       <span class="angle-val">{{ scanAngle | number: '1.0-0' }}°</span>
       <span class="angle-sub">current beam azimuth</span>
     </div>
   </aside>
 
-  <!-- ── Dual radar displays ────────────────────────────────────── -->
+  <!-- ── Radar display panels ───────────────────────────────────── -->
   <main class="mode-main">
     <div class="radar-row">
-      <!-- Beamforming radar -->
+      <!-- Phased-array beamforming -->
       <div class="radar-card bf">
         <div class="radar-header">
           <div class="radar-status-dot active"></div>
           <span class="radar-title">Phased Array Beamforming</span>
           <div class="radar-chips">
             <span class="chip blue">{{ arrayConfig.numElements }} elements</span>
-            <span class="chip blue"
-              >{{ (180 / arrayConfig.numElements).toFixed(1) }}° beamwidth</span
-            >
+            <span class="chip blue">{{ physicalBeamWidthDeg | number: '1.1-1' }}° HPBW</span>
           </div>
         </div>
         <div class="radar-canvas-wrap">
           <canvas #bfCanvas class="radar-canvas"></canvas>
         </div>
         <div class="radar-footer">
-          <span class="footer-note"
-            >Beam steered by dynamically adjusting element phase delays</span
-          >
+          <span class="footer-note">
+            Electronic steering via per-element phase delays · Narrow beam = finer size estimation
+          </span>
         </div>
       </div>
 
-      <!-- Traditional radar -->
+      <!-- Traditional rotating sweep -->
       <div class="radar-card trd">
         <div class="radar-header">
           <div class="radar-status-dot active green"></div>
@@ -210,12 +245,13 @@
           <canvas #trdCanvas class="radar-canvas"></canvas>
         </div>
         <div class="radar-footer">
-          <span class="footer-note"
-            >Single rotating beam — no electronic steering, slower response</span
-          >
+          <span class="footer-note">
+            Single rotating beam — no electronic steering, slower update rate
+          </span>
         </div>
       </div>
 
+      <!-- Interference / constructive-destructive pattern -->
       <div class="radar-card interference">
         <div class="radar-header">
           <div class="radar-status-dot active"></div>
@@ -234,11 +270,13 @@
           ></app-interference-field>
         </div>
         <div class="radar-footer">
-          <span class="footer-note"
-            >Constructive (bright) and destructive (dark) interference between elements</span
-          >
+          <span class="footer-note">
+            Bright = constructive · Dark = destructive interference between elements
+          </span>
         </div>
       </div>
     </div>
+    <!-- /radar-row -->
   </main>
 </div>
+<!-- /mode-layout -->
