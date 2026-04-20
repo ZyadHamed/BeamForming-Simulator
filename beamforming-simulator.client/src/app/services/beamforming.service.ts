@@ -34,7 +34,6 @@ export interface BeamformRequest {
   arrayConfig: ArrayConfig;
   snr?: number;
   window?: ArrayConfig['apodizationWindow'];
-  window?: ArrayConfig["apodizationWindow"]
   targetAngle?: number;
   targetX?: number;
   targetY?: number;
@@ -66,6 +65,7 @@ export interface RadarSetupRequest {
   noise_floor_dbm: number;
   wave_speed: number;
   elements: RadarElementInput[];
+}
 // ── 5G Interfaces ──────────────────────────────────────────────────
 export interface Tower5GRequest {
   tower_id: string;
@@ -101,7 +101,7 @@ export interface NetworkStateResult {
 
 // ── Environment switch ─────────────────────────────────────────────
 const USE_MOCK = false; // ← flip to false once backend is live
-const API_BASE = ''; // ← configure to match your backend
+const API_BASE = 'http://localhost:8000'; // ← configure to match your backend
 
 @Injectable({ providedIn: 'root' })
 export class BeamformingService {
