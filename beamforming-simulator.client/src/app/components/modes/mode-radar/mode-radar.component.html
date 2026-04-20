@@ -184,14 +184,14 @@
 
       <div class="targets-list">
         <div class="target-row" *ngFor="let tgt of targets; trackBy: trackById">
-          <div class="tgt-indicator" [class.detected]="tgt.detected && tgt.blipAge < 50"></div>
+          <div class="tgt-indicator" [class.detected]="isDetected(tgt)"></div>
           <div class="tgt-info">
             <div
               class="tgt-header-row"
               style="display: flex; justify-content: space-between; align-items: center"
             >
               <span class="tgt-label">{{ tgt.label }}</span>
-              <span class="tgt-status detected" *ngIf="tgt.detected && tgt.blipAge < 50">LOCK</span>
+              <span class="tgt-status detected" *ngIf="isDetected(tgt)">LOCK</span>
               <button class="rm-btn" (click)="removeTarget(tgt.id)">✕</button>
             </div>
 
