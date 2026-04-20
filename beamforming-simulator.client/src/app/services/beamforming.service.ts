@@ -34,6 +34,7 @@ export interface BeamformRequest {
   arrayConfig: ArrayConfig;
   snr?: number;
   window?: ArrayConfig['apodizationWindow'];
+  window?: ArrayConfig["apodizationWindow"]
   targetAngle?: number;
   targetX?: number;
   targetY?: number;
@@ -65,6 +66,37 @@ export interface RadarSetupRequest {
   noise_floor_dbm: number;
   wave_speed: number;
   elements: RadarElementInput[];
+// ── 5G Interfaces ──────────────────────────────────────────────────
+export interface Tower5GRequest {
+  tower_id: string;
+  x_m: number;
+  y_m: number;
+  num_elements: number;
+  element_spacing_mm: number;
+  max_coverage_radius_m: number;
+}
+
+export interface User5GRequest {
+  user_id: string;
+  x_m: number;
+  y_m: number;
+  allocated_frequency_mhz: number;
+}
+
+export interface LinkQuality {
+  user_id: string;
+  tower_id: string;
+  sector_name: string;
+  global_angle_deg: number;
+  local_beam_angle_deg: number;
+  snr_db: number;
+  data_rate_mbps: number;
+}
+
+export interface NetworkStateResult {
+  timestamp: number;
+  active_connections: LinkQuality[];
+  dropped_users: string[];
 }
 
 // ── Environment switch ─────────────────────────────────────────────
@@ -170,6 +202,32 @@ export class BeamformingService {
       targetAngleDeg,
       speedMs,
     });
+  }
+
+  // ── 5G API methods ─────────────────────────────────────────────
+
+  /**
+   * Initialize or replace towers on the backend.
+   * Call once on load, or whenever tower count / parameters change.
+   * POST /5g-scenario/towers
+   */
+  initTowers(towers: Tower5GRequest[]): Observable<{ message: string }> {
+    return this.http.post<{ message: string }>(
+      `${API_BASE}/5g-scenario/towers`,
+      { towers },
+    );
+  }
+
+  /**
+   * Push updated user positions and receive live link calculations.
+   * Call this every animation frame (or on movement).
+   * POST /5g-scenario/update-users
+   */
+  updateUsers(users: User5GRequest[]): Observable<NetworkStateResult> {
+    return this.http.post<NetworkStateResult>(
+      `${API_BASE}/5g-scenario/update-users`,
+      { users },
+    );
   }
 
   // ── Mock implementations ───────────────────────────────────────
