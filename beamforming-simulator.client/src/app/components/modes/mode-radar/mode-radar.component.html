@@ -3,14 +3,6 @@
     <div class="ctrl-section">
       <div class="section-label">Scan Parameters</div>
 
-      <div
-        class="ctrl-group"
-        style="flex-direction: row; align-items: center; justify-content: space-between"
-      >
-        <label class="ctrl-label" style="margin-bottom: 0">Show Range Bins (Backend Data)</label>
-        <input type="checkbox" [(ngModel)]="showRangeBins" style="cursor: pointer" />
-      </div>
-
       <div class="ctrl-group">
         <label class="ctrl-label">
           Scan Speed
@@ -22,7 +14,8 @@
           min="0.2"
           max="5"
           step="0.1"
-          [(ngModel)]="scanSpeed"
+          [value]="scanSpeed"
+          (input)="scanSpeed = +$any($event.target).value"
         />
       </div>
 
@@ -37,7 +30,8 @@
           min="0.2"
           max="1"
           step="0.05"
-          [(ngModel)]="scanRange"
+          [value]="scanRange"
+          (input)="scanRange = +$any($event.target).value"
         />
       </div>
 
@@ -71,8 +65,10 @@
           min="-180"
           max="0"
           step="5"
-          [(ngModel)]="sectorMin"
+          [value]="sectorMin"
+          (input)="sectorMin = +$any($event.target).value"
         />
+
         <label class="ctrl-label" style="margin-top: 6px">
           Sector Max <span class="val">{{ sectorMax }}°</span>
         </label>
@@ -82,7 +78,8 @@
           min="0"
           max="180"
           step="5"
-          [(ngModel)]="sectorMax"
+          [value]="sectorMax"
+          (input)="sectorMax = +$any($event.target).value"
         />
       </div>
     </div>
@@ -100,7 +97,8 @@
           min="50"
           max="90"
           step="1"
-          [(ngModel)]="txPower"
+          [value]="txPower"
+          (input)="txPower = +$any($event.target).value"
           (change)="onHardwareChange()"
         />
       </div>
@@ -115,7 +113,8 @@
           min="300"
           max="3000"
           step="100"
-          [(ngModel)]="prfHz"
+          [value]="prfHz"
+          (input)="prfHz = +$any($event.target).value"
           (change)="onHardwareChange()"
         />
       </div>
@@ -130,7 +129,8 @@
           min="0.1"
           max="5.0"
           step="0.1"
-          [(ngModel)]="pulseWidthUs"
+          [value]="pulseWidthUs"
+          (input)="pulseWidthUs = +$any($event.target).value"
           (change)="onHardwareChange()"
         />
       </div>
@@ -141,33 +141,36 @@
 
       <div class="cmp-row" style="margin-bottom: 4px">
         <span class="cmp-label" style="margin-bottom: 0; width: 120px">Array Gain:</span>
-        <span class="cmp-bf better">{{ radarInfo.array_gain_db | number: '1.1-1' }} dBi</span>
-      </div>
-
-      <div class="cmp-row" style="margin-bottom: 4px">
-        <span class="cmp-label" style="margin-bottom: 0; width: 120px">Range Resolution:</span>
-        <span class="cmp-bf better">{{ radarInfo.range_resolution_m | number: '1.1-1' }} m</span>
-      </div>
-
-      <div class="cmp-row" style="margin-bottom: 4px">
-        <span class="cmp-label" style="margin-bottom: 0; width: 120px">Max Unambiguous:</span>
         <span class="cmp-bf better"
-          >{{ radarInfo.max_unambiguous_range_m / 1000 | number: '1.1-1' }} km</span
+          >{{
+            radarInfo.array_gain_db !== undefined
+              ? (radarInfo.array_gain_db | number: '1.1-1')
+              : radarInfo.main_lobe_width
+                ? 20
+                : 0
+          }}
+          dBi</span
         >
       </div>
 
       <div class="cmp-row" style="margin-bottom: 4px">
+        <span class="cmp-label" style="margin-bottom: 0; width: 120px">Range Resolution:</span>
+        <span class="cmp-bf better">{{ rangeResolutionM | number: '1.1-1' }} m</span>
+      </div>
+
+      <div class="cmp-row" style="margin-bottom: 4px">
+        <span class="cmp-label" style="margin-bottom: 0; width: 120px">Max Unambiguous:</span>
+        <span class="cmp-bf better">{{ maxUnambRangeKm | number: '1.1-1' }} km</span>
+      </div>
+
+      <div class="cmp-row" style="margin-bottom: 4px">
         <span class="cmp-label" style="margin-bottom: 0; width: 120px">HPBW:</span>
-        <span class="cmp-bf better">{{ radarInfo.hpbw_deg | number: '1.1-1' }}°</span>
+        <span class="cmp-bf better">{{ physicalBeamWidthDeg | number: '1.1-1' }}°</span>
       </div>
 
       <div class="cmp-row">
         <span class="cmp-label" style="margin-bottom: 0; width: 120px">Side Lobe Level:</span>
-        <span class="cmp-bf better">{{
-          radarInfo.side_lobe_level !== null
-            ? (radarInfo.side_lobe_level | number: '1.1-1') + ' dB'
-            : 'N/A'
-        }}</span>
+        <span class="cmp-bf better">{{ sideLobeLevel | number: '1.1-1' }} dB</span>
       </div>
     </div>
 
@@ -181,17 +184,14 @@
 
       <div class="targets-list">
         <div class="target-row" *ngFor="let tgt of targets; trackBy: trackById">
-          <div
-            class="tgt-indicator"
-            [class.detected]="tgt.blipAge < 30 || tgt.trdBlipAge < 30"
-          ></div>
+          <div class="tgt-indicator" [class.detected]="tgt.detected && tgt.blipAge < 50"></div>
           <div class="tgt-info">
             <div
               class="tgt-header-row"
               style="display: flex; justify-content: space-between; align-items: center"
             >
               <span class="tgt-label">{{ tgt.label }}</span>
-              <span class="tgt-status detected" *ngIf="tgt.blipAge < 30">LOCK</span>
+              <span class="tgt-status detected" *ngIf="tgt.detected && tgt.blipAge < 50">LOCK</span>
               <button class="rm-btn" (click)="removeTarget(tgt.id)">✕</button>
             </div>
 
@@ -203,8 +203,8 @@
                 min="0"
                 max="359"
                 step="1"
-                [ngModel]="tgt.angle"
-                (ngModelChange)="onAngleChange(tgt.id, $event)"
+                [value]="tgt.angle"
+                (input)="tgt.angle = +$any($event.target).value"
               />
             </div>
 
@@ -216,8 +216,8 @@
                 min="0"
                 max="1"
                 step="0.01"
-                [ngModel]="tgt.range"
-                (ngModelChange)="onRangeChange(tgt.id, $event)"
+                [value]="tgt.range"
+                (input)="tgt.range = +$any($event.target).value"
               />
             </div>
 
@@ -229,8 +229,8 @@
                 min="1"
                 max="20"
                 step="0.5"
-                [ngModel]="tgt.rcs"
-                (ngModelChange)="onRcsChange(tgt.id, $event)"
+                [value]="tgt.rcs"
+                (input)="tgt.rcs = +$any($event.target).value"
               />
             </div>
           </div>
@@ -240,12 +240,7 @@
     </div>
 
     <div class="sidebar-array-wrap">
-      <div class="section-label" style="padding: 8px 12px 0">
-        Phased Array
-        <span class="beam-note" style="text-transform: none; float: right"
-          >↑ change N to widen/narrow beam</span
-        >
-      </div>
+      <div class="section-label" style="padding: 8px 12px 0">Phased Array</div>
       <app-probe-array
         [arrayConfig]="arrayConfig"
         label="Radar Array"
