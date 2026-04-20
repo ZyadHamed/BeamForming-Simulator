@@ -34,7 +34,6 @@ export interface BeamformRequest {
   arrayConfig: ArrayConfig;
   snr?: number;
   window?: ArrayConfig['apodizationWindow'];
-  window?: ArrayConfig["apodizationWindow"]
   targetAngle?: number;
   targetX?: number;
   targetY?: number;
@@ -66,6 +65,7 @@ export interface RadarSetupRequest {
   noise_floor_dbm: number;
   wave_speed: number;
   elements: RadarElementInput[];
+}
 // ── 5G Interfaces ──────────────────────────────────────────────────
 export interface Tower5GRequest {
   tower_id: string;
@@ -212,10 +212,7 @@ export class BeamformingService {
    * POST /5g-scenario/towers
    */
   initTowers(towers: Tower5GRequest[]): Observable<{ message: string }> {
-    return this.http.post<{ message: string }>(
-      `${API_BASE}/5g-scenario/towers`,
-      { towers },
-    );
+    return this.http.post<{ message: string }>(`${API_BASE}/5g-scenario/towers`, { towers });
   }
 
   /**
@@ -224,10 +221,7 @@ export class BeamformingService {
    * POST /5g-scenario/update-users
    */
   updateUsers(users: User5GRequest[]): Observable<NetworkStateResult> {
-    return this.http.post<NetworkStateResult>(
-      `${API_BASE}/5g-scenario/update-users`,
-      { users },
-    );
+    return this.http.post<NetworkStateResult>(`${API_BASE}/5g-scenario/update-users`, { users });
   }
 
   // ── Mock implementations ───────────────────────────────────────

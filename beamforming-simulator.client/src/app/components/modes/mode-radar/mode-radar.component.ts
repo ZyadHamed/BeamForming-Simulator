@@ -12,17 +12,8 @@ import {
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
-import { ProbeArrayComponent } from '../../probe-array/probe-array.component';
 import { BeamformingService } from '../../../services/beamforming.service';
-import {
-  ArrayConfig,
-  makeDefaultArrayConfig,
-  PREDEFINED_SCENARIOS,
-} from '../../../models/beamforming.models';
-import {
-  InterferenceFieldComponent,
-  ElementPosition,
-} from '../../interference-field/interference-field.component';
+import { ArrayConfig } from '../../../models/beamforming.models';
 
 // ── How many degrees the beam must sweep before we dispatch a scan request.
 // Larger = fewer requests, coarser real-time data. 10° is a good balance.
@@ -54,7 +45,7 @@ interface RadarTarget {
 @Component({
   selector: 'app-mode-radar',
   standalone: true,
-  imports: [CommonModule, FormsModule, ProbeArrayComponent, InterferenceFieldComponent],
+  imports: [CommonModule, FormsModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './mode-radar.component.html',
   styleUrls: ['./mode-radar.component.css'],
@@ -66,7 +57,6 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
   @ViewChild('patternCanvas', { static: true }) patternCanvasRef!: ElementRef<HTMLCanvasElement>;
 
   // ── Public state ─────────────────────────────────────────────
-  arrayConfig: ArrayConfig = makeDefaultArrayConfig(12);
   targets: RadarTarget[] = [];
   scanAngle: number = 0;
   scanSpeed: number = 1.2; // degrees per animation frame
@@ -76,11 +66,21 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
   sectorMin: number = -60;
   sectorMax: number = 60;
   detectedCount: number = 0;
+  numElements: number = 12;
+  elementSpacing: number = 15.0;
+  steeringAngle: number = 0.0;
+  apodization: string = 'hanning';
+  snr: number = 60.0;
+  frequencyGhz: number = 9.5; // 9.5 GHz = X-band radar
+  readonly apodizationOptions = ['none', 'hanning', 'hamming', 'blackman'];
 
   txPower: number = 70.0;
   prfHz: number = 1000.0;
   pulseWidthUs: number = 1.0;
   radarInfo: any = null;
+
+  interferenceImage: string | null = null;
+  interferenceSize: { cols: number; rows: number } | null = null;
 
   // ── Private state ─────────────────────────────────────────────
   private trdAngle: number = 0;
@@ -89,7 +89,8 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
   private backendBusy: boolean = false;
   private lastBackendAngle: number = 0; // always kept mod 360
   private angleSinceLastReq: number = 0; // accumulated degrees since last request
-  private patternDirty: boolean = false;
+  private beamPattern: number[] = [];
+  private anglesDeg: number[] = [];
 
   readonly maxRangeKm = 100;
 
@@ -102,10 +103,9 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
   // FIX 10: prefer backend value when available
   get physicalBeamWidthDeg(): number {
     if (this.radarInfo?.hpbw_deg) return this.radarInfo.hpbw_deg;
-    const freqMHz = this.arrayConfig.elements[0]?.frequency ?? 9500;
-    const lambda = 3e8 / (freqMHz * 1e6);
-    const N = Math.max(this.arrayConfig.elements.filter((e) => e.enabled).length, 1);
-    const d = this.arrayConfig.elementSpacing / 1000;
+    const lambda = (300_000.0 * 1e6) / (this.frequencyGhz * 1e9) / 1000.0;
+    const N = Math.max(this.numElements, 1);
+    const d = this.elementSpacing / 1000;
     const aperture = Math.max((N - 1) * d, d);
     return Math.min(90, Math.max(1, (((0.886 * lambda) / aperture) * 180) / Math.PI));
   }
@@ -118,7 +118,7 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
   get maxUnambRangeKm(): number {
     return this.radarInfo?.max_unambiguous_range_m != null
       ? this.radarInfo.max_unambiguous_range_m / 1000
-      : 3e8 / (2 * this.prfHz) / 1000;
+      : 300_000.0 / (2 * this.prfHz) / 1e6;
   }
 
   get sideLobeLevel(): number {
@@ -144,9 +144,6 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
   ) {}
 
   ngOnInit(): void {
-    const preset = PREDEFINED_SCENARIOS.find((s) => s.mode === 'radar');
-    if (preset) this.arrayConfig = { ...preset.array };
-
     this.targets = [
       {
         id: 't1',
@@ -180,11 +177,17 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
       },
     ];
 
-    this.beamSvc.setupRadar(this.buildRadarSetupRequest(this.arrayConfig)).subscribe({
+    this.beamSvc.setupRadar(this.buildRadarSetupRequest()).subscribe({
       next: (res: any) => {
         this.radarReady = true;
         this.radarInfo = res;
-        this.patternDirty = true;
+        this.beamPattern = res.beam_pattern ?? [];
+        this.interferenceImage = res.interference_image ?? null;
+        this.interferenceSize = res.interference_cols
+          ? { cols: res.interference_cols, rows: res.interference_rows }
+          : null;
+        this.anglesDeg = res.angles_deg ?? [];
+        setTimeout(() => this.drawPatternCanvas(), 0);
         this.cdr.markForCheck();
       },
       error: (e) => console.warn('Radar setup failed:', e),
@@ -213,31 +216,18 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
     return tgt.id;
   }
 
-  get interferencePositions(): ElementPosition[] {
-    const W = 360,
-      H = 360;
-    const cx = W / 2,
-      cy = H / 2;
-    const n = this.arrayConfig.elements.length;
-    const d = this.arrayConfig.elementSpacing * 2;
-    return this.arrayConfig.elements.map((el, i) => ({
-      x: cx + (i - (n - 1) / 2) * d,
-      y: cy,
-      config: el,
-    }));
-  }
-
-  onArrayConfigChange(cfg: ArrayConfig): void {
-    this.arrayConfig = cfg;
-    this.onHardwareChange();
-  }
-
   onHardwareChange(): void {
-    this.beamSvc.setupRadar(this.buildRadarSetupRequest(this.arrayConfig)).subscribe({
+    this.beamSvc.setupRadar(this.buildRadarSetupRequest()).subscribe({
       next: (res: any) => {
         this.radarReady = true;
         this.radarInfo = res;
-        this.patternDirty = true;
+        this.beamPattern = res.beam_pattern ?? [];
+        this.interferenceImage = res.interference_image ?? null;
+        this.interferenceSize = res.interference_cols
+          ? { cols: res.interference_cols, rows: res.interference_rows }
+          : null;
+        this.anglesDeg = res.angles_deg ?? [];
+        setTimeout(() => this.drawPatternCanvas(), 0);
         if (this.ppiCtx) this.ppiCtx.clearRect(0, 0, this.ppiCanvas.width, this.ppiCanvas.height);
         this.cdr.markForCheck();
       },
@@ -281,17 +271,17 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
     return this.targets.filter((t) => this.isDetected(t)).length;
   }
 
-  private buildRadarSetupRequest(cfg: ArrayConfig): any {
+  private buildRadarSetupRequest(): any {
     return {
-      num_elements: cfg.numElements,
-      element_spacing: cfg.elementSpacing,
-      frequency_mhz: cfg.elements[0]?.frequency ?? 9500.0,
-      geometry: cfg.geometry,
-      curvature_radius: cfg.curvatureRadius,
-      steering_angle: cfg.steeringAngle,
-      focus_depth: cfg.focusDepth,
-      snr: cfg.snr,
-      apodization: cfg.apodizationWindow,
+      num_elements: this.numElements,
+      element_spacing: this.elementSpacing, // mm, backend expects mm
+      frequency_mhz: this.frequencyGhz * 1000, // convert GHz → MHz for backend
+      geometry: 'linear',
+      curvature_radius: 0.0,
+      steering_angle: this.steeringAngle,
+      focus_depth: 0.0,
+      snr: this.snr,
+      apodization: this.apodization,
       noise_floor_dbm: -100.0,
       clutter_floor_dbm: -200.0,
       clutter_range_exp: -20.0,
@@ -301,18 +291,7 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
       pt_dbm: this.txPower,
       prf_hz: this.prfHz,
       pulse_width_us: this.pulseWidthUs,
-      wave_speed: 3e8,
-      elements: cfg.elements.map((el) => ({
-        element_id: el.id,
-        label: el.label,
-        color: el.color,
-        frequency: el.frequency,
-        phase_shift: el.phaseShift,
-        time_delay: el.timeDelay,
-        intensity: el.intensity,
-        enabled: el.enabled,
-        apodization_weight: el.apodizationWeight,
-      })),
+      wave_speed: 300_000.0,
     };
   }
 
@@ -334,12 +313,6 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
         this.applyPhosphorFade();
         this.drawBeamformingCanvas();
         this.drawTraditionalCanvas();
-
-        // FIX 3: only redraw pattern when data actually changed
-        if (this.patternDirty) {
-          this.drawPatternCanvas();
-          this.patternDirty = false;
-        }
 
         this.animId = requestAnimationFrame(loop);
       };
@@ -670,130 +643,100 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   // FIX 2: fixed dB axis so sidelobe levels are physically meaningful.
-  // FIX 3: only called when patternDirty = true (radarInfo just updated).
   private drawPatternCanvas(): void {
-    const canvas = this.patternCanvasRef?.nativeElement;
-    if (!canvas || !this.radarInfo) return;
-    const ctx = canvas.getContext('2d');
+    const canvasEl = this.patternCanvasRef?.nativeElement;
+    if (!canvasEl || !this.beamPattern.length) return;
+
+    const ctx = canvasEl.getContext('2d');
     if (!ctx) return;
 
-    const W = (canvas.width = canvas.offsetWidth || 300);
-    const H = (canvas.height = canvas.offsetHeight || 150);
+    const W = (canvasEl.width = canvasEl.offsetWidth || 400);
+    const H = (canvasEl.height = canvasEl.offsetHeight || 400);
     ctx.clearRect(0, 0, W, H);
 
-    // 1. Extract and Normalize the Pattern
-    let pattern: number[];
+    const cx = W / 2;
+    const cy = H * 0.62; // lower center gives headroom for top labels
+    const radius = Math.min(W, cy) - 20; // radius fits within available space
 
-    if (this.radarInfo.beam_pattern_db) {
-      // If the backend eventually provides ready-to-go dB values, use them.
-      pattern = this.radarInfo.beam_pattern_db;
-    } else if (this.radarInfo.beam_pattern && this.radarInfo.beam_pattern.length > 0) {
-      // Find the absolute peak of the raw data
-      const maxVal = Math.max(...this.radarInfo.beam_pattern);
+    const DB_FLOOR = -40;
+    const norm = this.beamPattern.map((db) =>
+      Math.max(0, Math.min(1, (Math.max(db, DB_FLOOR) - DB_FLOOR) / -DB_FLOOR)),
+    );
 
-      pattern = this.radarInfo.beam_pattern.map((val: number) => {
-        // If the array is empty zeroes, or the value is 0, send to the floor
-        if (maxVal <= 0 || val <= 0) return -60;
-
-        // Normalize against the peak so the max ratio is exactly 1.0 (which is 0 dB)
-        const ratio = val / maxVal;
-
-        // Convert to dB, clamping anything smaller than 1 millionth of the peak to -60 dB
-        return ratio > 1e-6 ? 10 * Math.log10(ratio) : -60;
-      });
-    } else {
-      return; // No data to draw
-    }
-
-    const angles: number[] = this.radarInfo.angles_deg;
-    if (!pattern || pattern.length === 0) return;
-
-    // FIX 2: FIXED dB scale — 0 dB at top, DB_FLOOR at bottom.
-    // This makes sidelobe levels (e.g. -13.5 dB) visually meaningful.
-    const DB_FLOOR = -60;
-    const DB_CEIL = 0;
-
-    // Background grid lines at fixed dB levels
-    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-    ctx.lineWidth = 1;
-    const dbLevels = [0, -10, -20, -30, -40, -50, -60];
-
-    dbLevels.forEach((db) => {
-      const y = H - ((db - DB_FLOOR) / (DB_CEIL - DB_FLOOR)) * H;
+    // Grid rings
+    [10, 20, 30, 40].forEach((dbDown) => {
+      const r = radius * (1 - dbDown / 40);
       ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(W, y);
+      ctx.arc(cx, cy, r, Math.PI, 0);
+      ctx.strokeStyle = `rgba(26,115,232,${0.08 + ((40 - dbDown) / 40) * 0.12})`;
+      ctx.lineWidth = 1;
       ctx.stroke();
-
-      ctx.fillStyle = 'rgba(255,255,255,0.3)';
-      ctx.font = '7px IBM Plex Mono, monospace';
-      ctx.textAlign = 'right';
-      ctx.fillText(`${db}`, W - 2, y - 2);
+      ctx.fillStyle = 'rgba(26,115,232,0.45)';
+      ctx.font = '8px IBM Plex Mono, monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(`-${dbDown}`, cx + r + 2, cy - 2);
     });
 
-    // Beam pattern curve
-    ctx.beginPath();
-    ctx.strokeStyle = '#34a853';
-    ctx.lineWidth = 1.5;
+    // Spokes
+    [-90, -60, -45, -30, -15, 0, 15, 30, 45, 60, 90].forEach((a) => {
+      const rad = ((a - 90) * Math.PI) / 180;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + radius * Math.cos(rad), cy + radius * Math.sin(rad));
+      ctx.strokeStyle = 'rgba(26,115,232,0.07)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      const lx = cx + (radius + 14) * Math.cos(rad);
+      const ly = cy + (radius + 14) * Math.sin(rad);
+      ctx.fillStyle = 'rgba(26,115,232,0.55)';
+      ctx.font = '8px IBM Plex Mono, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${a}°`, lx, ly + 3);
+    });
 
-    for (let i = 0; i < pattern.length; i++) {
-      const x = (i / (pattern.length - 1)) * W;
-      const dbVal = Math.max(DB_FLOOR, Math.min(DB_CEIL, pattern[i]));
-      const y = H - ((dbVal - DB_FLOOR) / (DB_CEIL - DB_FLOOR)) * H;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
+    // Fill
+    const drawPath = () => {
+      ctx.beginPath();
+      let first = true;
+      this.anglesDeg.forEach((angle, i) => {
+        const r = norm[i] * radius;
+        const rad = ((angle - 90) * Math.PI) / 180;
+        const px = cx + r * Math.cos(rad);
+        const py = cy + r * Math.sin(rad);
+        if (first) {
+          ctx.moveTo(px, py);
+          first = false;
+        } else ctx.lineTo(px, py);
+      });
+      ctx.closePath();
+    };
+
+    drawPath();
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+    grad.addColorStop(0, 'rgba(26,115,232,0.45)');
+    grad.addColorStop(1, 'rgba(26,115,232,0.05)');
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    drawPath();
+    ctx.strokeStyle = '#1a73e8';
+    ctx.lineWidth = 1.8;
+    ctx.shadowColor = '#1a73e8';
+    ctx.shadowBlur = 6;
     ctx.stroke();
+    ctx.shadowBlur = 0;
 
-    // -3 dB marker line
-    const y3dB = H - ((-3 - DB_FLOOR) / (DB_CEIL - DB_FLOOR)) * H;
-    ctx.setLineDash([4, 4]);
-    ctx.strokeStyle = 'rgba(255,200,0,0.5)';
-    ctx.lineWidth = 1;
+    // Steering marker
+    const beamAngle = this.radarInfo?.beam_angle ?? this.steeringAngle;
+    const steerRad = ((beamAngle - 90) * Math.PI) / 180;
     ctx.beginPath();
-    ctx.moveTo(0, y3dB);
-    ctx.lineTo(W, y3dB);
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + radius * Math.cos(steerRad), cy + radius * Math.sin(steerRad));
+    ctx.strokeStyle = 'rgba(255,100,80,0.8)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 3]);
     ctx.stroke();
     ctx.setLineDash([]);
-
-    ctx.fillStyle = 'rgba(255,200,0,0.7)';
-    ctx.font = '7px IBM Plex Mono, monospace';
-    ctx.textAlign = 'left';
-    ctx.fillText('-3 dB', 2, y3dB - 2);
-
-    // Sidelobe marker
-    const sll = this.sideLobeLevel;
-    if (sll > DB_FLOOR && sll < -3) {
-      const ySll = H - ((sll - DB_FLOOR) / (DB_CEIL - DB_FLOOR)) * H;
-      ctx.setLineDash([2, 6]);
-      ctx.strokeStyle = 'rgba(234,67,53,0.5)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(0, ySll);
-      ctx.lineTo(W, ySll);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      ctx.fillStyle = 'rgba(234,67,53,0.7)';
-      ctx.font = '7px IBM Plex Mono, monospace';
-      ctx.textAlign = 'left';
-      ctx.fillText(`SLL ${sll.toFixed(1)} dB`, 2, ySll - 2);
-    }
-
-    // Angle axis labels (using angles_deg from backend)
-    if (angles?.length) {
-      const firstAngle = angles[0].toFixed(0);
-      const lastAngle = angles[angles.length - 1].toFixed(0);
-      const midAngle = angles[Math.floor(angles.length / 2)].toFixed(0);
-      ctx.fillStyle = 'rgba(255,255,255,0.3)';
-      ctx.font = '7px IBM Plex Mono, monospace';
-      ctx.textAlign = 'left';
-      ctx.fillText(`${firstAngle}°`, 2, H - 2);
-      ctx.textAlign = 'center';
-      ctx.fillText(`${midAngle}°`, W / 2, H - 2);
-      ctx.textAlign = 'right';
-      ctx.fillText(`${lastAngle}°`, W - 2, H - 2);
-    }
   }
 
   // FIX 13: added range labels on rings
