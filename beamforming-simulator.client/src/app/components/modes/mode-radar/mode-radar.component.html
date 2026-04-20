@@ -1,89 +1,246 @@
-<!-- ════════════════════════════════════════════════════════════════
-     ModeRadarComponent template
-     ════════════════════════════════════════════════════════════════ -->
 <div class="mode-layout">
-
-  <!-- ── Sidebar ──────────────────────────────────────────────── -->
   <aside class="mode-sidebar">
-
-    <!-- Scan controls -->
     <div class="ctrl-section">
       <div class="section-label">Scan Parameters</div>
 
       <div class="ctrl-group">
         <label class="ctrl-label">
           Scan Speed
-          <span class="val">{{ scanSpeed | number:'1.1-1' }} °/frame</span>
+          <span class="val">{{ scanSpeed | number: '1.1-1' }} °/frame</span>
         </label>
-        <input type="range" class="styled-slider"
-          min="0.2" max="5" step="0.1"
-          [(ngModel)]="scanSpeed"
+        <input
+          type="range"
+          class="styled-slider"
+          min="0.2"
+          max="5"
+          step="0.1"
+          [value]="scanSpeed"
+          (input)="scanSpeed = +$any($event.target).value"
         />
       </div>
 
       <div class="ctrl-group">
         <label class="ctrl-label">
           Scan Range
-          <span class="val">{{ scanRange * 100 | number:'1.0-0' }} km</span>
+          <span class="val">{{ scanRange * maxRangeKm | number: '1.0-0' }} km</span>
         </label>
-        <input type="range" class="styled-slider"
-          min="0.2" max="1" step="0.05"
-          [(ngModel)]="scanRange"
+        <input
+          type="range"
+          class="styled-slider"
+          min="0.2"
+          max="1"
+          step="0.05"
+          [value]="scanRange"
+          (input)="scanRange = +$any($event.target).value"
         />
       </div>
 
       <div class="ctrl-group">
         <label class="ctrl-label">Sweep Mode</label>
         <div class="toggle-row">
-          <button class="toggle-btn" [class.active]="sweepMode==='full'"   (click)="sweepMode='full'">Full 360°</button>
-          <button class="toggle-btn" [class.active]="sweepMode==='sector'" (click)="sweepMode='sector'">Sector</button>
+          <button
+            class="toggle-btn"
+            [class.active]="sweepMode === 'full'"
+            (click)="sweepMode = 'full'"
+          >
+            Full 360°
+          </button>
+          <button
+            class="toggle-btn"
+            [class.active]="sweepMode === 'sector'"
+            (click)="sweepMode = 'sector'"
+          >
+            Sector
+          </button>
         </div>
       </div>
 
       <div class="ctrl-group" *ngIf="sweepMode === 'sector'">
         <label class="ctrl-label">
-          Sector Min
-          <span class="val">{{ sectorMin }}°</span>
+          Sector Min <span class="val">{{ sectorMin }}°</span>
         </label>
-        <input type="range" class="styled-slider"
-          min="-180" max="0" step="5"
-          [(ngModel)]="sectorMin"
+        <input
+          type="range"
+          class="styled-slider"
+          min="-180"
+          max="0"
+          step="5"
+          [value]="sectorMin"
+          (input)="sectorMin = +$any($event.target).value"
         />
-        <label class="ctrl-label" style="margin-top:6px">
-          Sector Max
-          <span class="val">{{ sectorMax }}°</span>
+
+        <label class="ctrl-label" style="margin-top: 6px">
+          Sector Max <span class="val">{{ sectorMax }}°</span>
         </label>
-        <input type="range" class="styled-slider"
-          min="0" max="180" step="5"
-          [(ngModel)]="sectorMax"
+        <input
+          type="range"
+          class="styled-slider"
+          min="0"
+          max="180"
+          step="5"
+          [value]="sectorMax"
+          (input)="sectorMax = +$any($event.target).value"
         />
       </div>
     </div>
 
-    <!-- Targets -->
+    <div class="ctrl-section">
+      <div class="section-label">Hardware & Waveform</div>
+
+      <div class="ctrl-group">
+        <label class="ctrl-label">
+          TX Power (Pt) <span class="val">{{ txPower }} dBm</span>
+        </label>
+        <input
+          type="range"
+          class="styled-slider"
+          min="50"
+          max="90"
+          step="1"
+          [value]="txPower"
+          (input)="txPower = +$any($event.target).value"
+          (change)="onHardwareChange()"
+        />
+      </div>
+
+      <div class="ctrl-group">
+        <label class="ctrl-label">
+          Pulse Repetition <span class="val">{{ prfHz }} Hz</span>
+        </label>
+        <input
+          type="range"
+          class="styled-slider"
+          min="300"
+          max="3000"
+          step="100"
+          [value]="prfHz"
+          (input)="prfHz = +$any($event.target).value"
+          (change)="onHardwareChange()"
+        />
+      </div>
+
+      <div class="ctrl-group">
+        <label class="ctrl-label">
+          Pulse Width <span class="val">{{ pulseWidthUs | number: '1.1-1' }} µs</span>
+        </label>
+        <input
+          type="range"
+          class="styled-slider"
+          min="0.1"
+          max="5.0"
+          step="0.1"
+          [value]="pulseWidthUs"
+          (input)="pulseWidthUs = +$any($event.target).value"
+          (change)="onHardwareChange()"
+        />
+      </div>
+    </div>
+
+    <div class="ctrl-section" *ngIf="radarInfo">
+      <div class="section-label">Derived Parameters</div>
+
+      <div class="cmp-row" style="margin-bottom: 4px">
+        <span class="cmp-label" style="margin-bottom: 0; width: 120px">Array Gain:</span>
+        <span class="cmp-bf better"
+          >{{
+            radarInfo.array_gain_db !== undefined
+              ? (radarInfo.array_gain_db | number: '1.1-1')
+              : radarInfo.main_lobe_width
+                ? 20
+                : 0
+          }}
+          dBi</span
+        >
+      </div>
+
+      <div class="cmp-row" style="margin-bottom: 4px">
+        <span class="cmp-label" style="margin-bottom: 0; width: 120px">Range Resolution:</span>
+        <span class="cmp-bf better">{{ rangeResolutionM | number: '1.1-1' }} m</span>
+      </div>
+
+      <div class="cmp-row" style="margin-bottom: 4px">
+        <span class="cmp-label" style="margin-bottom: 0; width: 120px">Max Unambiguous:</span>
+        <span class="cmp-bf better">{{ maxUnambRangeKm | number: '1.1-1' }} km</span>
+      </div>
+
+      <div class="cmp-row" style="margin-bottom: 4px">
+        <span class="cmp-label" style="margin-bottom: 0; width: 120px">HPBW:</span>
+        <span class="cmp-bf better">{{ physicalBeamWidthDeg | number: '1.1-1' }}°</span>
+      </div>
+
+      <div class="cmp-row">
+        <span class="cmp-label" style="margin-bottom: 0; width: 120px">Side Lobe Level:</span>
+        <span class="cmp-bf better">{{ sideLobeLevel | number: '1.1-1' }} dB</span>
+      </div>
+    </div>
+
     <div class="ctrl-section">
       <div class="section-label-row">
-        <span class="section-label">Targets ({{ targets.length }})</span>
-        <button class="add-tgt-btn" (click)="addTarget()">+ Add</button>
+        <span class="section-label">Targets ({{ targets.length }}/5)</span>
+        <button class="add-tgt-btn" (click)="addTarget()" [disabled]="targets.length >= 5">
+          + Add
+        </button>
       </div>
 
       <div class="targets-list">
-        <div class="target-row" *ngFor="let tgt of targets">
-          <div class="tgt-indicator" [class.detected]="tgt.blipAge < 30"></div>
+        <div class="target-row" *ngFor="let tgt of targets; trackBy: trackById">
+          <div class="tgt-indicator" [class.detected]="isDetected(tgt)"></div>
           <div class="tgt-info">
-            <span class="tgt-label">{{ tgt.label }}</span>
-            <span class="tgt-meta">{{ tgt.angle | number:'1.0-0' }}° / {{ tgt.range * 100 | number:'1.0-0' }}km</span>
+            <div
+              class="tgt-header-row"
+              style="display: flex; justify-content: space-between; align-items: center"
+            >
+              <span class="tgt-label">{{ tgt.label }}</span>
+              <span class="tgt-status detected" *ngIf="isDetected(tgt)">LOCK</span>
+              <button class="rm-btn" (click)="removeTarget(tgt.id)">✕</button>
+            </div>
+
+            <div style="margin-top: 4px">
+              <label class="ctrl-label" style="font-size: 9px">Angle</label>
+              <input
+                type="range"
+                class="styled-slider"
+                min="0"
+                max="359"
+                step="1"
+                [value]="tgt.angle"
+                (input)="tgt.angle = +$any($event.target).value"
+              />
+            </div>
+
+            <div style="margin-top: 4px">
+              <label class="ctrl-label" style="font-size: 9px">Range</label>
+              <input
+                type="range"
+                class="styled-slider"
+                min="0"
+                max="1"
+                step="0.01"
+                [value]="tgt.range"
+                (input)="tgt.range = +$any($event.target).value"
+              />
+            </div>
+
+            <div style="margin-top: 4px">
+              <label class="ctrl-label" style="font-size: 9px">RCS (m²)</label>
+              <input
+                type="range"
+                class="styled-slider"
+                min="1"
+                max="20"
+                step="0.5"
+                [value]="tgt.rcs"
+                (input)="tgt.rcs = +$any($event.target).value"
+              />
+            </div>
           </div>
-          <span class="tgt-status detected" *ngIf="tgt.blipAge < 30">LOCK</span>
-          <button class="rm-btn" (click)="removeTarget(tgt.id)">✕</button>
         </div>
-        <div class="entity-empty" *ngIf="!targets.length">No targets placed</div>
+        <div *ngIf="targets.length === 0" class="entity-empty">No targets active.</div>
       </div>
     </div>
 
-    <!-- Array config -->
     <div class="sidebar-array-wrap">
-      <div class="section-label" style="padding:8px 12px 0">Phased Array</div>
+      <div class="section-label" style="padding: 8px 12px 0">Phased Array</div>
       <app-probe-array
         [arrayConfig]="arrayConfig"
         label="Radar Array"
@@ -92,53 +249,45 @@
       ></app-probe-array>
     </div>
 
-    <!-- Detection meter -->
     <div class="detect-bar">
       <div class="detect-label">
         <span>Detections</span>
         <span class="detect-val">{{ detectedCount }} / {{ targets.length }}</span>
       </div>
       <div class="detect-track">
-        <div class="detect-fill" [style.width.%]="targets.length ? detectedCount / targets.length * 100 : 0"></div>
+        <div
+          class="detect-fill"
+          [style.width.%]="targets.length ? (detectedCount / targets.length) * 100 : 0"
+        ></div>
       </div>
     </div>
-
-    <!-- Beam angle indicator -->
-    <div class="angle-display">
-      <span class="angle-val">{{ scanAngle | number:'1.0-0' }}°</span>
-      <span class="angle-sub">current beam azimuth</span>
-    </div>
-
   </aside>
 
-  <!-- ── Dual radar displays ────────────────────────────────────── -->
   <main class="mode-main">
-
-    <div class="radar-row">
-
-      <!-- Beamforming radar -->
+    <div class="radar-row" style="flex: 1.5">
       <div class="radar-card bf">
         <div class="radar-header">
-          <div class="radar-status-dot active"></div>
-          <span class="radar-title">Phased Array Beamforming</span>
+          <div class="radar-status-dot"></div>
+          <span class="radar-title">Phased Array Simulator</span>
           <div class="radar-chips">
-            <span class="chip blue">{{ arrayConfig.numElements }} elements</span>
-            <span class="chip blue">{{ (180 / arrayConfig.numElements).toFixed(1) }}° beamwidth</span>
+            <span class="chip blue">Electronic steer</span>
+            <span class="chip blue">Dynamic HPBW</span>
           </div>
         </div>
         <div class="radar-canvas-wrap">
           <canvas #bfCanvas class="radar-canvas"></canvas>
         </div>
         <div class="radar-footer">
-          <span class="footer-note">Beam steered by dynamically adjusting element phase delays</span>
+          <span class="footer-note">
+            Beam synthesized by phase delays. Width ∝ 1/N. Detects using Range-Bin CA-CFAR.
+          </span>
         </div>
       </div>
 
-      <!-- Traditional radar -->
       <div class="radar-card trd">
         <div class="radar-header">
-          <div class="radar-status-dot active green"></div>
-          <span class="radar-title">Traditional Rotating Sweep</span>
+          <div class="radar-status-dot green"></div>
+          <span class="radar-title">Legacy Radar</span>
           <div class="radar-chips">
             <span class="chip green">Mechanical scan</span>
             <span class="chip green">360° sweep</span>
@@ -148,69 +297,59 @@
           <canvas #trdCanvas class="radar-canvas"></canvas>
         </div>
         <div class="radar-footer">
-          <span class="footer-note">Single rotating beam — no electronic steering, slower response</span>
+          <span class="footer-note">
+            Single rotating beam — no electronic steering, slower update rate.
+          </span>
         </div>
       </div>
+    </div>
 
+    <div class="radar-row" style="flex: 1">
       <div class="radar-card interference">
-  <div class="radar-header">
-    <div class="radar-status-dot active"></div>
-    <span class="radar-title">Interference Pattern</span>
-    <div class="radar-chips">
-      <span class="chip amber">Element superposition</span>
-    </div>
-  </div>
-  <div class="radar-canvas-wrap">
-    <app-interference-field
-      [elementPositions]="interferencePositions"
-      fieldGeometry="polar"
-      [propagationSpeed]="3e8"
-      tint="amber"
-      [resolution]="4"
-    ></app-interference-field>
-  </div>
-  <div class="radar-footer">
-    <span class="footer-note">Constructive (bright) and destructive (dark) interference between elements</span>
-  </div>
-</div>
+        <div class="radar-header">
+          <div class="radar-status-dot active"></div>
+          <span class="radar-title">Interference Pattern</span>
+          <div class="radar-chips">
+            <span
+              class="chip amber"
+              style="background: rgba(232, 168, 43, 0.2); color: rgba(255, 200, 100, 0.9)"
+              >Element superposition</span
+            >
+          </div>
+        </div>
+        <div class="radar-canvas-wrap">
+          <app-interference-field
+            [elementPositions]="interferencePositions"
+            fieldGeometry="polar"
+            [propagationSpeed]="3e8"
+            tint="amber"
+            [resolution]="4"
+          ></app-interference-field>
+        </div>
+        <div class="radar-footer">
+          <span class="footer-note">
+            Bright = constructive · Dark = destructive interference between elements
+          </span>
+        </div>
+      </div>
 
-    </div>
-
-    <!-- Comparison table -->
-    <div class="comparison-strip">
-      <div class="cmp-card">
-        <div class="cmp-label">Beam Agility</div>
-        <div class="cmp-row">
-          <span class="cmp-bf better">Electronic (µs)</span>
-          <span class="cmp-vs">vs</span>
-          <span class="cmp-trd">Mechanical (ms–s)</span>
+      <div class="radar-card" style="border-color: rgba(52, 168, 83, 0.4)">
+        <div class="radar-header">
+          <div class="radar-status-dot green"></div>
+          <span class="radar-title">Antenna Radiation Pattern</span>
+          <div class="radar-chips">
+            <span class="chip green">Beam Profile</span>
+          </div>
         </div>
-      </div>
-      <div class="cmp-card">
-        <div class="cmp-label">Multi-Target</div>
-        <div class="cmp-row">
-          <span class="cmp-bf better">Simultaneous</span>
-          <span class="cmp-vs">vs</span>
-          <span class="cmp-trd">Sequential</span>
+        <div class="radar-canvas-wrap" style="padding: 15px">
+          <canvas #patternCanvas style="width: 100%; height: 100%; display: block"></canvas>
         </div>
-      </div>
-      <div class="cmp-card">
-        <div class="cmp-label">Reliability</div>
-        <div class="cmp-row">
-          <span class="cmp-bf better">No moving parts</span>
-          <span class="cmp-vs">vs</span>
-          <span class="cmp-trd">Mechanical wear</span>
-        </div>
-      </div>
-      <div class="cmp-card">
-        <div class="cmp-label">Cost</div>
-        <div class="cmp-row">
-          <span class="cmp-bf">Higher (T/R modules)</span>
-          <span class="cmp-vs">vs</span>
-          <span class="cmp-trd better">Lower (simpler HW)</span>
+        <div class="radar-footer">
+          <span class="footer-note">
+            Normalized dB gain vs Angle. Apodization shapes this beam to suppress side-lobes.
+          </span>
         </div>
       </div>
     </div>
-
   </main>
 </div>

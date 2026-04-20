@@ -17,7 +17,10 @@ from fastapi.middleware.gzip import GZipMiddleware
 from Objects.Scenarios.Telecom5GScenario import Telecom5GScenario, UserEquipment, Tower5G
 from Objects.ArrayConfig import ArrayConfig, ProbeElement
 
-# py -m uvicorn endpoints:app --reload
+from Objects.Scenarios.RadarScenario import (
+    RadarScenario, RadarScanResult, RadarWaveform, RadarDetectionConfig,
+)
+from Objects.Physics.RadarEnviroment import RadarEnvironment, RadarTarget
 
 # ── Single FastAPI instance ────────────────────────────────────────
 app = FastAPI()
@@ -152,6 +155,245 @@ def update_users_and_evaluate(req: UserUpdateRequest):
 
     active_scenario.users = updated_user_list
     result = active_scenario.evaluate_network_links()
+    
+    return result
+
+# --- Radar State ---
+active_radar: Optional[RadarScenario] = None
+
+# --- Radar DTOs ---
+class RadarSetupRequest(BaseModel):
+    # ── Array geometry ─────────────────────────────────────────────────────
+    num_elements     : int
+    element_spacing  : float                                          # mm
+    frequency_mhz    : float                                          # MHz
+    geometry         : Literal['linear', 'curved', 'phased'] = 'linear'
+    curvature_radius : float  = 60.0
+    steering_angle   : float  = 0.0
+    focus_depth      : float  = 0.0
+    snr              : float  = 60.0                                  # dB, 0–1000
+    apodization      : Literal['none', 'hanning', 'hamming', 'blackman', 'kaiser', 'tukey'] = 'none'
+    elements         : List[ElementInput] = []
+
+    # ── Waveform (maps to RadarWaveform value object) ──────────────────────
+    pt_dbm           : float  = 70.0
+    prf_hz           : float  = 1000.0
+    pulse_width_us   : float  = 1.0
+
+    # ── Environment (maps to RadarEnvironment) ─────────────────────────────
+    noise_floor_dbm  : float  = -100.0
+    clutter_floor_dbm: float  = -200.0
+    clutter_range_exp: float  = -20.0
+
+    # ── Detector (maps to RadarDetectionConfig) ────────────────────────────
+    cfar_guard_cells : int    = 2
+    cfar_ref_cells   : int    = 8
+    cfar_pfa         : float  = 1e-4
+
+class RadarTargetDTO(BaseModel):
+    target_id  : str
+    x_m        : float
+    y_m        : float
+    velocity_m_s: float = 0.0
+    rcs_sqm    : float
+
+class RadarScanRequest(BaseModel):
+    start_angle    : float
+    end_angle      : float
+    num_lines      : int   = 36
+    max_range_m    : float = 150_000.0
+    num_range_bins : int   = 128
+    targets        : List[RadarTargetDTO]
+
+class RadarInfoResponse(BaseModel):
+    """
+    Derived radar parameters echoed back after /radar/setup.
+    """
+    num_elements           : int
+    carrier_freq_hz        : float
+    wavelength_m           : float
+    array_gain_db          : float
+    hpbw_deg               : float
+    range_resolution_m     : float
+    max_unambiguous_range_m: float
+    pt_dbm                 : float
+    prf_hz                 : float
+    pulse_width_us         : float
+    noise_floor_dbm        : float
+    
+    # --- Added for UI Antenna Pattern Plotting ---
+    beam_pattern           : List[float]
+    angles_deg             : List[float]
+    beam_angle             : float
+    main_lobe_width        : float
+    side_lobe_level        : Optional[float]
+
+# --- Radar Endpoints ---
+
+def _build_array_config(req: RadarSetupRequest) -> ArrayConfig:
+    """
+    Private factory: translate a RadarSetupRequest into an ArrayConfig.
+
+    Extracted from the endpoint handler to keep the handler thin.
+    """
+    if req.elements:
+        elements = [
+            ProbeElement(
+                element_id        = el.element_id,
+                label             = el.label,
+                color             = el.color,
+                frequency         = el.frequency,
+                phase_shift       = el.phase_shift,
+                time_delay        = el.time_delay,
+                intensity         = el.intensity,
+                enabled           = el.enabled,
+                apodization_weight= getattr(el, 'apodization_weight', 1.0),
+            ) for el in req.elements
+        ]
+    else:
+        elements = [
+            ProbeElement(
+                element_id  = f"el_{i}",
+                label       = f"E{i}",
+                color       = "#ea4335",
+                frequency   = req.frequency_mhz,
+                phase_shift = 0.0,
+                time_delay  = 0.0,
+                intensity   = 100.0,
+                enabled     = True,
+            ) for i in range(req.num_elements)
+        ]
+
+    config = ArrayConfig(
+        elements           = elements,
+        steering_angle     = req.steering_angle,
+        focus_depth        = req.focus_depth,
+        element_spacing    = req.element_spacing,
+        geometry           = req.geometry,
+        curvature_radius   = req.curvature_radius,
+        num_elements       = req.num_elements,
+        snr                = req.snr,
+        apodization_window = req.apodization,
+        kaiser_beta        = 14.0,
+        tukey_alpha        = 0.5,
+        wave_speed         = 3e8,   # enforced again by RadarScenario.__init__
+    )
+    # Apply apodization only when elements weren't supplied with explicit weights
+    if not req.elements:
+        config.apply_apodization()
+
+    return config
+
+@app.post("/radar/setup", response_model=RadarInfoResponse)
+def radar_setup(req: RadarSetupRequest):
+    """
+    Instantiate (or replace) the active RadarScenario session.
+
+    Called once when the radar page loads and again whenever the array
+    configuration, waveform, or detector parameters change.
+    """
+    global active_radar
+
+    config = _build_array_config(req)
+
+    waveform = RadarWaveform(
+        pt_dbm         = req.pt_dbm,
+        prf_hz         = req.prf_hz,
+        pulse_width_us = req.pulse_width_us,
+    )
+
+    environment = RadarEnvironment(
+        targets            = [],
+        noise_floor_dbm    = req.noise_floor_dbm,
+        clutter_floor_dbm  = req.clutter_floor_dbm,
+        clutter_range_exp  = req.clutter_range_exp,
+    )
+
+    detection_cfg = RadarDetectionConfig(
+        guard_cells = req.cfar_guard_cells,
+        ref_cells   = req.cfar_ref_cells,
+        pfa         = req.cfar_pfa,
+    )
+
+    # RadarScenario inherits Scenario (ABC)
+    active_radar = RadarScenario(
+        config        = config,
+        environment   = environment,
+        waveform      = waveform,
+        detection_cfg = detection_cfg,
+    )
+
+    params = active_radar.get_scan_parameters()
+    
+    # Compute the antenna's beam pattern so the UI can graph the lobes!
+    bf_result = config.compute_beamforming()
+
+    return RadarInfoResponse(
+        num_elements            = req.num_elements,
+        carrier_freq_hz         = params["carrier_freq_hz"],
+        wavelength_m            = params["wavelength_m"],
+        array_gain_db           = params["array_gain_db"],
+        hpbw_deg                = params["hpbw_deg"],
+        range_resolution_m      = params["range_resolution_m"],
+        max_unambiguous_range_m = params["max_unambiguous_range_m"],
+        pt_dbm                  = params["pt_dbm"],
+        prf_hz                  = params["prf_hz"],
+        pulse_width_us          = params["pulse_width_us"],
+        noise_floor_dbm         = params["noise_floor_dbm"],
+        
+        # --- NEW: Inject beamforming results ---
+        beam_pattern            = bf_result.beam_pattern_db,
+        angles_deg              = bf_result.angles_deg,
+        beam_angle              = bf_result.beam_angle,
+        main_lobe_width         = bf_result.main_lobe_width,
+        side_lobe_level         = bf_result.side_lobe_level
+    )
+
+@app.post("/radar/scan")
+def radar_scan(req: RadarScanRequest):
+    """
+    Execute a PPI sector scan and return sweep data plus CFAR detections.
+    """
+    global active_radar
+
+    if active_radar is None:
+        raise HTTPException(
+            status_code = 400,
+            detail      = "Radar not initialized. Call POST /radar/setup first.",
+        )
+
+    if len(req.targets) > 5:
+        raise HTTPException(
+            status_code = 422,
+            detail      = "Maximum of 5 solid bodies allowed per the simulator spec.",
+        )
+
+    # Replace environment targets via the encapsulated method
+    # (does not trigger a full re-instantiation of the scenario)
+    active_radar.environment.targets = [
+        RadarTarget(
+            target_id    = t.target_id,
+            x_m          = t.x_m,
+            y_m          = t.y_m,
+            velocity_m_s = t.velocity_m_s,
+            rcs_sqm      = t.rcs_sqm,
+        ) for t in req.targets
+    ]
+
+    result = active_radar.generate_ppi_scan(
+        start_angle    = req.start_angle,
+        end_angle      = req.end_angle,
+        num_lines      = req.num_lines,
+        max_range_m    = req.max_range_m,
+        num_range_bins = req.num_range_bins,
+    )
+
+    return {
+        "sweep_data" : result.sweep_data,
+        "detections" : [vars(d) for d in result.detections],
+    }
+
+# --- Pydantic Schemas for API I/O ---
 
     # ── Convert dataclass → plain dict for JSON serialization ──────
     return {
