@@ -99,6 +99,38 @@ export interface NetworkStateResult {
   dropped_users: string[];
 }
 
+/** Shape of one sector returned by GET /5g-scenario/tower-beams/:id */
+export interface SectorBeamData {
+  name: string;
+  boresight_deg: number;
+  steering_angle_deg: number;
+  global_pointing_deg: number;
+  scan_angles_deg: number[];
+  beam_pattern_db: number[];
+  array_config: {
+    num_elements: number;
+    element_spacing_mm: number;
+    frequency_mhz: number;
+    apodization: string;
+    snr_db: number;
+  };
+}
+
+export interface TowerBeamsResponse {
+  tower_id: string;
+  sectors: SectorBeamData[];
+}
+
+export interface TowerConfigUpdateRequest {
+  tower_id: string;
+  apodization: string;
+  snr: number;
+  kaiser_beta?: number;
+  num_elements?: number;
+  element_spacing_mm?: number;
+}
+
+
 // ── Environment switch ─────────────────────────────────────────────
 const USE_MOCK = false; // ← flip to false once backend is live
 const API_BASE = 'http://localhost:8000'; // ← configure to match your backend
@@ -228,6 +260,22 @@ export class BeamformingService {
       `${API_BASE}/5g-scenario/update-users`,
       { users },
     );
+  }
+
+  /**
+   * Fetch polar beam-pattern data for all 3 sectors of a tower.
+   * GET /5g-scenario/tower-beams/:towerId
+   */
+  getTowerBeams(towerId: string): Observable<TowerBeamsResponse> {
+    return this.http.get<TowerBeamsResponse>(`${API_BASE}/5g-scenario/tower-beams/${towerId}`);
+  }
+
+  /**
+   * Update apodization / SNR for a tower and get back fresh beam patterns.
+   * POST /5g-scenario/update-tower-config
+   */
+  updateTowerConfig(req: TowerConfigUpdateRequest): Observable<TowerBeamsResponse> {
+    return this.http.post<TowerBeamsResponse>(`${API_BASE}/5g-scenario/update-tower-config`, req);
   }
 
   // ── Mock implementations ───────────────────────────────────────
