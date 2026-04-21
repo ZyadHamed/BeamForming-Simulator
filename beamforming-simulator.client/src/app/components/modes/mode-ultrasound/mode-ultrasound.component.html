@@ -1,187 +1,320 @@
-<!-- ════════════════════════════════════════════════════════════════
-     ModeUltrasoundComponent  (refactored)
-
-     Layout (top → bottom, left → right):
-     ┌─────────────────────────────────────────────────────────────┐
-     │  TOOLBAR  preset selector                                   │
-     ├──────────────┬──────────────────────────────────────────────┤
-     │              │  Wavefront Propagation  │  B-Mode Image      │
-     │   Probe      ├─────────────────────────────────────────────-│
-     │   Array      │  BeamformingViewer (panels 1–3)              │
-     │   Sidebar    │    Panel 1: probe mirror                     │
-     │              │    Panel 2: interference map                 │
-     │              │    Panel 3: beam profile + IFFT strip        │
-     ├──────────────┴──────────────────────────────────────────────┤
-     │  METRICS STRIP  (beam angle · main lobe · side lobe · …)   │
-     └─────────────────────────────────────────────────────────────┘
-     ════════════════════════════════════════════════════════════════ -->
-
 <div class="mode-layout">
 
-  <!-- ══ TOOLBAR ═══════════════════════════════════════════════════ -->
+  <!-- ══ TOOLBAR ══════════════════════════════════════════════ -->
   <header class="mode-toolbar">
-
-    <!-- Preset selector -->
-    <div class="preset-bar" *ngIf="ultrasoundPresets.length">
-      <span class="preset-label">Preset</span>
-      <select class="styled-select"
-        [(ngModel)]="selectedPreset"
-        (ngModelChange)="loadPreset($event)">
-        <option value="">— Select scenario —</option>
-        <option *ngFor="let p of ultrasoundPresets" [value]="p.name">{{ p.name }}</option>
-      </select>
+    <div class="toolbar-left">
+      <div class="mode-selector">
+        <button class="mode-btn" [class.active]="scanMode==='a-mode'"  (click)="scanMode='a-mode'">A-Mode</button>
+        <button class="mode-btn" [class.active]="scanMode==='b-mode'"  (click)="scanMode='b-mode'">B-Mode</button>
+        <button class="mode-btn" [class.active]="scanMode==='doppler'" (click)="scanMode='doppler'">Doppler</button>
+      </div>
+      <div class="preset-bar" *ngIf="ultrasoundPresets.length">
+        <span class="preset-label">Preset</span>
+        <select class="styled-select" [(ngModel)]="selectedPreset" (ngModelChange)="loadPreset($event)">
+          <option value="">— Select —</option>
+          <option *ngFor="let p of ultrasoundPresets" [value]="p.name">{{ p.name }}</option>
+        </select>
+      </div>
     </div>
 
-    <!-- Info pills -->
-    <div class="mode-toolbar__pills">
+    <div class="toolbar-right">
       <span class="mode-pill mode-pill--blue">Ultrasound</span>
-      <span class="mode-pill mode-pill--green" *ngIf="beamResult">Computed</span>
-      <span class="mode-pill mode-pill--muted" *ngIf="!beamResult">Awaiting compute</span>
-      <span class="mode-pill mode-pill--amber">
-        {{ arrayConfig.numElements }} elements
-      </span>
+      <ng-container *ngIf="scanMode !== 'doppler'">
+        <span class="mode-pill" [class.mode-pill--green]="scenarioReady" [class.mode-pill--muted]="!scenarioReady">
+          {{ scenarioReady ? numScatterers + ' scatterers' : 'No scenario' }}
+        </span>
+      </ng-container>
+      <ng-container *ngIf="scanMode === 'doppler'">
+        <span class="mode-pill" [class.mode-pill--green]="vesselReady" [class.mode-pill--muted]="!vesselReady">
+          {{ vesselReady ? 'Vessel ready' : 'No vessel' }}
+        </span>
+      </ng-container>
+      <button class="action-btn primary" (click)="runScan()" [disabled]="loading">
+        <span *ngIf="!loading">▶ Run {{ scanMode | uppercase }}</span>
+        <span *ngIf="loading">⟳ {{ loadMsg }}</span>
+      </button>
     </div>
-
   </header>
 
+  <!-- ══ ERROR BAR ════════════════════════════════════════════ -->
+  <div class="error-bar" *ngIf="errMsg">
+    <span>⚠ {{ errMsg }}</span>
+    <button class="close-btn" (click)="errMsg=''">✕</button>
+  </div>
 
-  <!-- ══ BODY: sidebar + main content ══════════════════════════════ -->
+  <!-- ══ BODY ═════════════════════════════════════════════════ -->
   <div class="mode-body">
 
-    <!-- ── LEFT: Probe Array Sidebar ─────────────────────────────── -->
+    <!-- ── LEFT SIDEBAR ────────────────────────────────────── -->
     <aside class="mode-sidebar">
-      <div class="sidebar-array-wrap">
-        <app-probe-array
-          [arrayConfig]="arrayConfig"
-          label="Ultrasound Probe"
-          [showBeamResult]="true"
-          (configChange)="onArrayConfigChange($event)"
-          (beamResult)="onBeamResult($event)"
-        ></app-probe-array>
+
+      <!-- Probe config (always visible) -->
+      <div class="sidebar-section">
+        <div class="section-hd">Probe Configuration</div>
+        <div class="param-grid">
+          <label>Elements</label>
+          <input type="number" [(ngModel)]="probe.num_elements" min="4" max="256">
+          <label>Pitch (mm)</label>
+          <input type="number" [(ngModel)]="probe.pitch_mm" step="0.1" min="0.1">
+          <label>Freq (MHz)</label>
+          <input type="number" [(ngModel)]="probe.frequency_mhz" step="0.5" min="0.5">
+          <label>Focus (mm)</label>
+          <input type="number" [(ngModel)]="probe.focus_depth_mm" step="1" min="1">
+          <label>SNR (dB)</label>
+          <input type="number" [(ngModel)]="probe.snr_db" step="1">
+          <label>Apodization</label>
+          <select [(ngModel)]="probe.apodization_window">
+            <option value="none">None</option>
+            <option value="hanning">Hanning</option>
+            <option value="hamming">Hamming</option>
+            <option value="blackman">Blackman</option>
+          </select>
+          <label>Geometry</label>
+          <select [(ngModel)]="probe.geometry">
+            <option value="linear">Linear</option>
+            <option value="curved">Curved</option>
+            <option value="phased">Phased</option>
+          </select>
+        </div>
+        <button class="action-btn small" (click)="scanMode !== 'doppler' ? createScenario() : createVesselScenario()" [disabled]="loading">
+          ↻ Rebuild {{ scanMode === 'doppler' ? 'Vessel' : 'Scenario' }}
+        </button>
       </div>
+
+      <!-- A-mode params -->
+      <div class="sidebar-section" *ngIf="scanMode==='a-mode'">
+        <div class="section-hd">A-Mode Parameters</div>
+        <div class="param-info">
+          Probe <strong>{{ probeAngle.toFixed(1) }}°</strong> + Steer <strong>{{ beamSteer.toFixed(1) }}°</strong>
+          = <strong>{{ (probeAngle + beamSteer).toFixed(1) }}°</strong> absolute
+        </div>
+        <div class="param-grid">
+          <label>Beam steer (°)</label>
+          <input type="number" [(ngModel)]="beamSteer" min="-45" max="45" step="1">
+          <label>Max depth (mm)</label>
+          <input type="number" [(ngModel)]="bDepth" min="10" max="200" step="5">
+        </div>
+        <p class="sidebar-hint">Drag the probe ring on the phantom to reposition. Drag the gold handle to steer the beam.</p>
+      </div>
+
+      <!-- B-mode params -->
+      <div class="sidebar-section" *ngIf="scanMode==='b-mode'">
+        <div class="section-hd">B-Mode Parameters</div>
+        <div class="param-info">
+          Sector <strong>{{ (probeAngle + bStart).toFixed(1) }}°</strong> → <strong>{{ (probeAngle + bEnd).toFixed(1) }}°</strong>
+        </div>
+        <div class="param-grid">
+          <label>Start angle (°)</label>
+          <input type="number" [(ngModel)]="bStart" min="-90" max="0" step="1">
+          <label>End angle (°)</label>
+          <input type="number" [(ngModel)]="bEnd" min="0" max="90" step="1">
+          <label>Scan lines</label>
+          <input type="number" [(ngModel)]="bLines" min="8" max="256" step="1">
+          <label>Max depth (mm)</label>
+          <input type="number" [(ngModel)]="bDepth" min="10" max="200" step="5">
+        </div>
+        <p class="sidebar-hint">Drag the probe on the phantom to sweep from different positions.</p>
+      </div>
+
+      <!-- Doppler params -->
+      <div class="sidebar-section" *ngIf="scanMode==='doppler'">
+        <div class="section-hd">Vessel Configuration</div>
+        <p class="sidebar-hint">
+          Coordinates are in the <strong>vessel session's own space</strong>:
+          probe face at Z = 0, depth increases downward.
+          This session is completely independent of the Shepp-Logan phantom.
+        </p>
+        <div class="param-grid">
+          <label>Centre X (mm)</label>
+          <input type="number" [(ngModel)]="vStartX" step="1">
+          <label>Centre Z (mm)</label>
+          <input type="number" [(ngModel)]="vStartZ" step="1" min="5">
+          <label>Flow dir X</label>
+          <input type="number" [(ngModel)]="vDirX" step="0.1">
+          <label>Flow dir Z</label>
+          <input type="number" [(ngModel)]="vDirZ" step="0.1">
+          <label>Radius (mm)</label>
+          <input type="number" [(ngModel)]="vRadius" min="0.5" step="0.5">
+          <label>Velocity (mm/s)</label>
+          <input type="number" [(ngModel)]="vVel" step="10">
+          <label>Blood cells</label>
+          <input type="number" [(ngModel)]="vCells" min="10" max="2000" step="10">
+        </div>
+        <button class="action-btn small" (click)="createVesselScenario()" [disabled]="loading">
+          ↻ Rebuild Vessel
+        </button>
+
+        <div class="section-hd" style="margin-top:10px">Doppler Parameters</div>
+        <div class="param-grid">
+          <label>PRF (Hz)</label>
+          <input type="number" [(ngModel)]="dPrf" min="100" step="100">
+          <label>Packet size</label>
+          <input type="number" [(ngModel)]="dPkt" min="2" max="32" step="1">
+          <label>Max depth (mm)</label>
+          <input type="number" [(ngModel)]="dDepth" min="10" max="200" step="5">
+        </div>
+
+        <div class="doppler-mode-toggle">
+          <button class="mode-btn small" [class.active]="dopplerMode==='line'"  (click)="dopplerMode='line'">Line</button>
+          <button class="mode-btn small" [class.active]="dopplerMode==='color'" (click)="dopplerMode='color'">Color</button>
+        </div>
+
+        <div class="param-grid" *ngIf="dopplerMode==='line'">
+          <label>Angle (°)</label>
+          <input type="number" [(ngModel)]="dAngle" min="-45" max="45" step="1">
+        </div>
+        <div class="param-grid" *ngIf="dopplerMode==='color'">
+          <label>Start angle (°)</label>
+          <input type="number" [(ngModel)]="dStart" min="-45" max="0" step="1">
+          <label>End angle (°)</label>
+          <input type="number" [(ngModel)]="dEnd" min="0" max="45" step="1">
+          <label>Scan lines</label>
+          <input type="number" [(ngModel)]="dLines" min="4" max="128" step="1">
+        </div>
+      </div>
+
     </aside>
 
-
-    <!-- ── RIGHT: Main viewport ───────────────────────────────────── -->
+    <!-- ── MAIN VIEWPORT ───────────────────────────────────── -->
     <main class="mode-main">
-
-      <!-- Row 1: Propagation + B-Mode -->
       <div class="viewport-row">
 
-        <!-- Wavefront propagation -->
+        <!-- LEFT canvas: Phantom (A/B-mode) OR Vessel schematic (Doppler) -->
         <div class="vp-card">
-          <div class="vp-header">
-            <span class="vp-title">Wavefront Propagation</span>
-            <span class="vp-badge blue">Live</span>
+
+          <!-- Phantom header — shown in A and B mode -->
+          <div class="vp-header" *ngIf="scanMode !== 'doppler'">
+            <span class="vp-title">Shepp-Logan Phantom</span>
+            <span class="vp-badge blue">Interactive</span>
+            <span class="vp-hint">Drag probe · Click region to edit</span>
+          </div>
+
+          <!-- Vessel header — shown in Doppler mode -->
+          <div class="vp-header" *ngIf="scanMode === 'doppler'">
+            <span class="vp-title">Vessel Phantom</span>
+            <span class="vp-badge" [class.green]="vesselReady" [class.muted]="!vesselReady">
+              {{ vesselReady ? 'Ready' : 'Not built' }}
+            </span>
+            <span class="vp-hint">Independent Doppler session</span>
+          </div>
+
+          <!-- Phantom canvas (A & B mode) -->
+          <div class="vp-canvas-wrap"
+            *ngIf="scanMode !== 'doppler'"
+            style="position:relative"
+            (mousemove)="onPhantomMove($event)"
+            (mousedown)="onPhantomDown($event)"
+            (mouseup)="onPhantomUp()"
+            (mouseleave)="onPhantomLeave()">
+            <canvas #phantomCanvas class="vp-canvas"></canvas>
+
+            <div class="phantom-tooltip"
+              *ngIf="hoveredRegion && !editingRegion"
+              [style.left.px]="tooltipX"
+              [style.top.px]="tooltipY">
+              <div class="tt-name">{{ hoveredRegion.name }}</div>
+              <div class="tt-row"><span>Speed of sound</span><span>{{ hoveredRegion.speed_of_sound }} m/s</span></div>
+              <div class="tt-row"><span>Attenuation</span><span>{{ hoveredRegion.attenuation_db_per_cm_mhz }} dB/cm/MHz</span></div>
+              <div class="tt-row"><span>Density</span><span>{{ hoveredRegion.density_kg_m3 }} kg/m³</span></div>
+              <div class="tt-row">
+                <span>Impedance</span>
+                <span>{{ (hoveredRegion.speed_of_sound * hoveredRegion.density_kg_m3 / 1e6).toFixed(2) }} MRayl</span>
+              </div>
+              <div class="tt-row" *ngIf="hoveredRegion.is_fluid"><span>Type</span><span class="tt-fluid">Fluid (anechoic)</span></div>
+              <div class="tt-hint">Click to edit properties</div>
+            </div>
+          </div>
+
+          <!-- Vessel schematic canvas (Doppler mode) -->
+          <div class="vp-canvas-wrap" *ngIf="scanMode === 'doppler'">
+            <canvas #vesselCanvas class="vp-canvas"></canvas>
+            <div class="empty-hint" *ngIf="!vesselReady">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <circle cx="12" cy="12" r="5"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2"/>
+              </svg>
+              <span>Click ↻ Rebuild Vessel to create the flow phantom</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT canvas: scan result -->
+        <div class="vp-card">
+          <div class="vp-header" [ngSwitch]="scanMode">
+            <span class="vp-title" *ngSwitchCase="'a-mode'">A-Mode Result</span>
+            <span class="vp-title" *ngSwitchCase="'b-mode'">B-Mode Image</span>
+            <span class="vp-title" *ngSwitchCase="'doppler'">
+              {{ dopplerMode === 'line' ? 'Doppler Spectrum' : 'Color Doppler' }}
+            </span>
+            <span class="vp-badge green" *ngIf="amodeData || bmodeData || dLineData || cDopplerData">Data</span>
+            <span class="vp-badge muted" *ngIf="!amodeData && !bmodeData && !dLineData && !cDopplerData">Empty</span>
           </div>
           <div class="vp-canvas-wrap">
-            <canvas #propCanvas class="vp-canvas"></canvas>
+            <canvas #amodeCanvas   class="vp-canvas" *ngIf="scanMode==='a-mode'"  [class.hidden]="!amodeData"></canvas>
+            <canvas #bmodeCanvas   class="vp-canvas" *ngIf="scanMode==='b-mode'"  [class.hidden]="!bmodeData"></canvas>
+            <canvas #dopplerCanvas class="vp-canvas" *ngIf="scanMode==='doppler'" [class.hidden]="!dLineData && !cDopplerData"></canvas>
+
+            <div class="empty-hint"
+              *ngIf="(scanMode==='a-mode'   && !amodeData)
+                  || (scanMode==='b-mode'   && !bmodeData)
+                  || (scanMode==='doppler'  && !dLineData && !cDopplerData)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M3 12h4l3-9 4 18 3-9h4" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <span *ngIf="scanMode !== 'doppler'">Click ▶ Run {{ scanMode | uppercase }} to scan</span>
+              <span *ngIf="scanMode === 'doppler' && !vesselReady">Build the vessel first, then click ▶ Run DOPPLER</span>
+              <span *ngIf="scanMode === 'doppler' && vesselReady">Click ▶ Run DOPPLER to scan</span>
+            </div>
           </div>
         </div>
 
-        <!-- B-mode depth map -->
-        <div class="vp-card narrow">
-          <div class="vp-header">
-            <span class="vp-title">B-Mode Image</span>
-            <span class="vp-badge amber">Mock</span>
-          </div>
-          <div class="vp-canvas-wrap">
-            <canvas #depthCanvas class="vp-canvas"></canvas>
-          </div>
-        </div>
-
-      </div><!-- /viewport-row 1 -->
-
-
-      <!-- Row 2: BeamformingViewer (replaces interference + IFFT cards) -->
-      <!--
-        [initialConfig]  – seeds the viewer's internal arrayConfig from
-                           the shared state managed here.
-        (configChange)   – fires when the viewer's probe array is edited,
-                           keeping both components in sync.
-        (beamResult)     – updates the metrics strip below.
-      -->
-      <div class="viewport-row viewer-row">
-        <app-beamforming-viewer
-          class="mode-beamforming-viewer"
-          [initialConfig]="arrayConfig"
-          (configChange)="onViewerConfigChange($event)"
-          (beamResultChange)="onBeamResult($event)"
-        ></app-beamforming-viewer>
       </div>
+    </main>
+  </div>
 
-
-      <!-- ── METRICS STRIP ───────────────────────────────────────── -->
-      <div class="metrics-panel" *ngIf="beamResult">
-
-        <div class="metric-card">
-          <div class="metric-icon blue">∠</div>
-          <div class="metric-body">
-            <div class="metric-label">Beam Angle</div>
-            <div class="metric-value">{{ beamResult.beamAngle | number:'1.1-1' }}°</div>
-          </div>
-        </div>
-
-        <div class="metric-card">
-          <div class="metric-icon amber">◈</div>
-          <div class="metric-body">
-            <div class="metric-label">Main Lobe</div>
-            <div class="metric-value">{{ beamResult.mainLobeWidth | number:'1.2-2' }}°</div>
-          </div>
-        </div>
-
-        <div class="metric-card">
-          <div class="metric-icon red">⊟</div>
-          <div class="metric-body">
-            <div class="metric-label">Side Lobe</div>
-            <div class="metric-value">{{ beamResult.sideLobeLevel | number:'1.1-1' }} dB</div>
-          </div>
-        </div>
-
-        <div class="metric-card">
-          <div class="metric-icon green">♦</div>
-          <div class="metric-body">
-            <div class="metric-label">Elements</div>
-            <div class="metric-value">{{ arrayConfig.numElements }}</div>
-          </div>
-        </div>
-
-        <div class="metric-card">
-          <div class="metric-icon blue">≋</div>
-          <div class="metric-body">
-            <div class="metric-label">Geometry</div>
-            <div class="metric-value">{{ arrayConfig.geometry }}</div>
-          </div>
-        </div>
-
-        <div class="metric-card">
-          <div class="metric-icon amber">⇥</div>
-          <div class="metric-body">
-            <div class="metric-label">Steering</div>
-            <div class="metric-value">{{ arrayConfig.steeringAngle | number:'1.1-1' }}°</div>
-          </div>
-        </div>
-
-        <div class="metric-card">
-          <div class="metric-icon green">⊙</div>
-          <div class="metric-body">
-            <div class="metric-label">Focus depth</div>
-            <div class="metric-value">{{ arrayConfig.focusDepth }} mm</div>
-          </div>
-        </div>
-
-      </div><!-- /metrics-panel -->
-
-      <!-- Empty metrics hint -->
-      <div class="empty-hint" *ngIf="!beamResult">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <path d="M3 12h4l3-9 4 18 3-9h4" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-        <span>Click "Recompute" in the Beamforming Viewer to run the FFT/IFFT pipeline</span>
+  <!-- ══ REGION EDITOR MODAL ══════════════════════════════════ -->
+  <div class="editor-backdrop" *ngIf="editingRegion" (click)="closeEditor()"></div>
+  <div class="editor-modal" *ngIf="editingRegion">
+    <div class="editor-hd">
+      <span>Edit: {{ editingRegion.name }}</span>
+      <button class="close-btn" (click)="closeEditor()">✕</button>
+    </div>
+    <div class="editor-body">
+      <div class="param-grid">
+        <label>Name</label>
+        <input type="text" [(ngModel)]="editingRegion.name">
+        <label>Center X (mm)</label>
+        <input type="number" [(ngModel)]="editingRegion.center_x" step="0.5">
+        <label>Center Z (mm)</label>
+        <input type="number" [(ngModel)]="editingRegion.center_z" step="0.5">
+        <label>Semi-axis X (mm)</label>
+        <input type="number" [(ngModel)]="editingRegion.semi_axis_x" step="0.5" min="0.1">
+        <label>Semi-axis Z (mm)</label>
+        <input type="number" [(ngModel)]="editingRegion.semi_axis_z" step="0.5" min="0.1">
+        <label>Rotation (°)</label>
+        <input type="number" [(ngModel)]="editingRegion.rotation_deg" step="1">
+        <label>Speed of sound (m/s)</label>
+        <input type="number" [(ngModel)]="editingRegion.speed_of_sound" step="10" min="300">
+        <label>Attenuation (dB/cm/MHz)</label>
+        <input type="number" [(ngModel)]="editingRegion.attenuation_db_per_cm_mhz" step="0.1" min="0">
+        <label>Density (kg/m³)</label>
+        <input type="number" [(ngModel)]="editingRegion.density_kg_m3" step="10" min="100">
+        <label>Fluid (anechoic)</label>
+        <select [(ngModel)]="editingRegion.is_fluid">
+          <option [ngValue]="false">No — Tissue</option>
+          <option [ngValue]="true">Yes — Fluid</option>
+        </select>
       </div>
+      <div class="editor-info">
+        <div class="tt-row">
+          <span>Acoustic impedance</span>
+          <span>{{ (editingRegion.speed_of_sound * editingRegion.density_kg_m3 / 1e6).toFixed(3) }} MRayl</span>
+        </div>
+      </div>
+    </div>
+    <div class="editor-footer">
+      <button class="action-btn small" (click)="closeEditor()">Cancel</button>
+      <button class="action-btn small primary" (click)="applyEdit()">Apply &amp; Rebuild</button>
+    </div>
+  </div>
 
-    </main><!-- /mode-main -->
-
-  </div><!-- /mode-body -->
-
-</div><!-- /mode-layout -->
+</div>
