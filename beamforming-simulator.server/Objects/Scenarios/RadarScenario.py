@@ -7,9 +7,10 @@ import numpy as np
 from Objects.ArrayConfig import ArrayConfig
 from Objects.Physics.RadarEnviroment import RadarEnvironment, RadarTarget
 from Objects.Scenarios.Scenario import Scenario
+from Objects.ArrayConfig import ArrayConfig, InterferenceFieldResult
 
 # ── Physical constants ─────────────────────────────────────────────────────────
-_C          = 3.0e8                                    # speed of light, m/s
+_C          = 300_000.0                                    # speed of light, m/s
 _4PI3_DB    = 10.0 * math.log10((4.0 * math.pi) ** 3)  # ≈ 33.0 dB
 _EFF_DB     = -1.5                                     # aperture efficiency (empirical)
 
@@ -22,11 +23,11 @@ class RadarWaveform:
 
     @property
     def max_unambiguous_range_m(self) -> float:
-        return _C / (2.0 * self.prf_hz)
+        return (_C * 1e6) / (2.0 * self.prf_hz) / 1000.0
 
     @property
     def range_resolution_m(self) -> float:
-        return (_C * self.pulse_width_us * 1e-6) / 2.0
+        return (_C * self.pulse_width_us) / 2.0 / 1000.0
 
 
 @dataclass(frozen=True)
@@ -116,7 +117,7 @@ class RadarScenario(Scenario):
 
     @property
     def wavelength_m(self) -> float:
-        return _C / self.carrier_freq_hz
+        return (_C * 1e6) / self.carrier_freq_hz / 1000.0
 
     @property
     def array_gain_db(self) -> float:
@@ -147,6 +148,19 @@ class RadarScenario(Scenario):
             "pulse_width_us":          self._waveform.pulse_width_us,
             "noise_floor_dbm":         self.environment.noise_floor_dbm,
         }
+    
+    def compute_interference_field(
+    self,
+    width_mm:       float = 500.0,
+    depth_mm:       float = 500.0,
+    resolution_mm:  float = 2.0,
+    ) -> "InterferenceFieldResult":
+        """Delegate to ArrayConfig and return the CW interference field."""
+        return self.config.compute_interference_field(
+            width_mm      = width_mm,
+            depth_mm      = depth_mm,
+            resolution_mm = resolution_mm,
+        )
 
     def perform_default_scan(
         self,

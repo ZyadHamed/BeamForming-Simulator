@@ -105,7 +105,7 @@
 
       <div class="ctrl-group">
         <label class="ctrl-label">
-          Pulse Repetition <span class="val">{{ prfHz }} Hz</span>
+          Pulse Repetition <span class="val">{{ prfHz / 1000 | number: '1.1-1' }} kHz</span>
         </label>
         <input
           type="range"
@@ -239,14 +239,107 @@
       </div>
     </div>
 
-    <div class="sidebar-array-wrap">
-      <div class="section-label" style="padding: 8px 12px 0">Phased Array</div>
-      <app-probe-array
-        [arrayConfig]="arrayConfig"
-        label="Radar Array"
-        [showBeamResult]="false"
-        (configChange)="onArrayConfigChange($event)"
-      ></app-probe-array>
+    <div class="ctrl-section">
+      <div class="section-label">Array Configuration</div>
+
+      <!-- Constants shown as read-only badges -->
+      <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px">
+        <span class="const-badge">Geometry: Linear</span>
+        <span class="const-badge">Wave Speed: 300,000.0 mm/µs</span>
+        <span class="const-badge">Focus: Plane Wave</span>
+      </div>
+
+      <div class="ctrl-group">
+        <label class="ctrl-label">
+          Elements <span class="val">{{ numElements }}</span>
+        </label>
+        <input
+          type="range"
+          class="styled-slider"
+          min="2"
+          max="32"
+          step="1"
+          [value]="numElements"
+          (input)="numElements = +$any($event.target).value; onHardwareChange()"
+        />
+        <span class="ctrl-hint">↑ elements = narrower beam</span>
+      </div>
+
+      <div class="ctrl-group">
+        <label class="ctrl-label">
+          Element Spacing <span class="val">{{ elementSpacing | number: '1.1-1' }} mm</span>
+        </label>
+        <input
+          type="range"
+          class="styled-slider"
+          min="1"
+          max="50"
+          step="0.5"
+          [value]="elementSpacing"
+          (input)="elementSpacing = +$any($event.target).value; onHardwareChange()"
+        />
+        <span class="ctrl-hint">↑ spacing = narrower beam</span>
+      </div>
+
+      <div class="ctrl-group">
+        <label class="ctrl-label">
+          Frequency <span class="val">{{ frequencyGhz | number: '1.1-1' }} GHz</span>
+        </label>
+        <input
+          type="range"
+          class="styled-slider"
+          min="1"
+          max="40"
+          step="0.5"
+          [value]="frequencyGhz"
+          (input)="frequencyGhz = +$any($event.target).value; onHardwareChange()"
+        />
+        <span class="ctrl-hint">↑ frequency = narrower beam</span>
+      </div>
+
+      <div class="ctrl-group">
+        <label class="ctrl-label">
+          Steering Angle <span class="val">{{ steeringAngle | number: '1.0-0' }}°</span>
+        </label>
+        <input
+          type="range"
+          class="styled-slider"
+          min="-60"
+          max="60"
+          step="1"
+          [value]="steeringAngle"
+          (input)="steeringAngle = +$any($event.target).value; onHardwareChange()"
+        />
+      </div>
+
+      <div class="ctrl-group">
+        <label class="ctrl-label">Apodization</label>
+        <div class="toggle-row" style="flex-wrap: wrap">
+          <button
+            class="toggle-btn"
+            *ngFor="let w of apodizationOptions"
+            [class.active]="apodization === w"
+            (click)="apodization = w; onHardwareChange()"
+          >
+            {{ w }}
+          </button>
+        </div>
+      </div>
+
+      <div class="ctrl-group">
+        <label class="ctrl-label">
+          SNR <span class="val">{{ snr | number: '1.0-0' }} dB</span>
+        </label>
+        <input
+          type="range"
+          class="styled-slider"
+          min="0"
+          max="100"
+          step="1"
+          [value]="snr"
+          (input)="snr = +$any($event.target).value; onHardwareChange()"
+        />
+      </div>
     </div>
 
     <div class="detect-bar">
@@ -264,7 +357,7 @@
   </aside>
 
   <main class="mode-main">
-    <div class="radar-row" style="flex: 1.5">
+    <div class="radar-row" style="height: 420px">
       <div class="radar-card bf">
         <div class="radar-header">
           <div class="radar-status-dot"></div>
@@ -304,7 +397,7 @@
       </div>
     </div>
 
-    <div class="radar-row" style="flex: 1">
+    <div class="radar-row" style="height: 420px">
       <div class="radar-card interference">
         <div class="radar-header">
           <div class="radar-status-dot active"></div>
@@ -317,14 +410,32 @@
             >
           </div>
         </div>
-        <div class="radar-canvas-wrap">
-          <app-interference-field
-            [elementPositions]="interferencePositions"
-            fieldGeometry="polar"
-            [propagationSpeed]="3e8"
-            tint="amber"
-            [resolution]="4"
-          ></app-interference-field>
+        <div
+          class="radar-canvas-wrap"
+          style="display: flex; align-items: center; justify-content: center"
+        >
+          <img
+            *ngIf="interferenceImage"
+            [src]="interferenceImage"
+            style="
+              display: block;
+              width: 100%;
+              height: 100%;
+              object-fit: contain;
+              image-rendering: pixelated;
+            "
+            alt="Interference Field"
+          />
+          <span
+            *ngIf="!interferenceImage"
+            style="
+              color: rgba(255, 200, 100, 0.4);
+              font:
+                9px IBM Plex Mono,
+                monospace;
+            "
+            >Awaiting scan data…</span
+          >
         </div>
         <div class="radar-footer">
           <span class="footer-note">
@@ -336,17 +447,18 @@
       <div class="radar-card" style="border-color: rgba(52, 168, 83, 0.4)">
         <div class="radar-header">
           <div class="radar-status-dot green"></div>
-          <span class="radar-title">Antenna Radiation Pattern</span>
+          <span class="radar-title">Beam Waveform</span>
           <div class="radar-chips">
             <span class="chip green">Beam Profile</span>
           </div>
         </div>
-        <div class="radar-canvas-wrap" style="padding: 15px">
+        <div class="radar-canvas-wrap">
           <canvas #patternCanvas style="width: 100%; height: 100%; display: block"></canvas>
         </div>
         <div class="radar-footer">
           <span class="footer-note">
-            Normalized dB gain vs Angle. Apodization shapes this beam to suppress side-lobes.
+            Normalized dB gain vs steering angle. -3 dB and sidelobe markers derived from backend
+            beamforming.
           </span>
         </div>
       </div>

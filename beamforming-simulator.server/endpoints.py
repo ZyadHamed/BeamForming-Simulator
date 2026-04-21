@@ -838,6 +838,10 @@ class RadarInfoResponse(BaseModel):
     beam_angle             : float
     main_lobe_width        : float
     side_lobe_level        : Optional[float]
+    
+    interference_image : str
+    interference_cols  : int
+    interference_rows  : int
 
 # --- Radar Endpoints ---
 
@@ -887,7 +891,7 @@ def _build_array_config(req: RadarSetupRequest) -> ArrayConfig:
         apodization_window = req.apodization,
         kaiser_beta        = 14.0,
         tukey_alpha        = 0.5,
-        wave_speed         = 3e8,   # enforced again by RadarScenario.__init__
+        wave_speed         = 300_000.0,
     )
     # Apply apodization only when elements weren't supplied with explicit weights
     if not req.elements:
@@ -937,7 +941,24 @@ def radar_setup(req: RadarSetupRequest):
     params = active_radar.get_scan_parameters()
     
     # Compute the antenna's beam pattern so the UI can graph the lobes!
+    config.calculate_steering_delays()
     bf_result = config.compute_beamforming()
+    
+    n_el      = len([e for e in active_radar.config.elements if e.enabled])
+    aperture  = (n_el - 1) * active_radar.config.element_spacing
+    width_mm  = max(aperture * 4, 100.0)
+    depth_mm  = width_mm
+    res_mm    = width_mm / 250.0   # keep ~250 pixels across
+
+    interference = active_radar.compute_interference_field(
+        width_mm      = width_mm,
+        depth_mm      = depth_mm,
+        resolution_mm = res_mm,
+    )
+    
+    #     width_mm      = 500.0,
+    #     depth_mm      = 500.0,
+    #     resolution_mm = 2.0,
 
     return RadarInfoResponse(
         num_elements            = req.num_elements,
@@ -957,7 +978,11 @@ def radar_setup(req: RadarSetupRequest):
         angles_deg              = bf_result.angles_deg,
         beam_angle              = bf_result.beam_angle,
         main_lobe_width         = bf_result.main_lobe_width,
-        side_lobe_level         = bf_result.side_lobe_level
+        side_lobe_level         = bf_result.side_lobe_level,
+        
+        interference_image = interference.image_base64,
+        interference_cols  = interference.cols,
+        interference_rows  = interference.rows,
     )
 
 @app.post("/radar/scan")
@@ -1000,9 +1025,9 @@ def radar_scan(req: RadarScanRequest):
     )
 
     return {
-        "sweep_data" : result.sweep_data,
-        "detections" : [vars(d) for d in result.detections],
-    }
+            "sweep_data" : result.sweep_data,
+            "detections" : [vars(d) for d in result.detections],
+        }
 
 # --- Pydantic Schemas for API I/O ---
 
