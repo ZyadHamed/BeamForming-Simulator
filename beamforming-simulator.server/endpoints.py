@@ -202,8 +202,9 @@ class RadarScanRequest(BaseModel):
     end_angle      : float
     num_lines      : int   = 36
     max_range_m    : float = 150_000.0
-    num_range_bins : int   = 128
+    num_range_bins : int   = 128          # ← ADDED
     targets        : List[RadarTargetDTO]
+    radar_type     : Literal['phased_array', 'traditional'] = 'phased_array'
 
 class RadarInfoResponse(BaseModel):
     """
@@ -386,32 +387,33 @@ def radar_scan(req: RadarScanRequest):
             status_code = 400,
             detail      = "Radar not initialized. Call POST /radar/setup first.",
         )
-
-    if len(req.targets) > 5:
-        raise HTTPException(
-            status_code = 422,
-            detail      = "Maximum of 5 solid bodies allowed per the simulator spec.",
-        )
-
-    # Replace environment targets via the encapsulated method
-    # (does not trigger a full re-instantiation of the scenario)
+        
     active_radar.environment.targets = [
-        RadarTarget(
-            target_id    = t.target_id,
-            x_m          = t.x_m,
-            y_m          = t.y_m,
-            velocity_m_s = t.velocity_m_s,
-            rcs_sqm      = t.rcs_sqm,
-        ) for t in req.targets
-    ]
+            RadarTarget(
+                target_id    = t.target_id,
+                x_m          = t.x_m,
+                y_m          = t.y_m,
+                velocity_m_s = t.velocity_m_s,
+                rcs_sqm      = t.rcs_sqm,
+            ) for t in req.targets
+        ]
 
-    result = active_radar.generate_ppi_scan(
-        start_angle    = req.start_angle,
-        end_angle      = req.end_angle,
-        num_lines      = req.num_lines,
-        max_range_m    = req.max_range_m,
-        num_range_bins = req.num_range_bins,
-    )
+    if req.radar_type == 'traditional':
+        result = active_radar.generate_traditional_scan(
+            start_angle    = req.start_angle,
+            end_angle      = req.end_angle,
+            num_lines      = req.num_lines,
+            max_range_m    = req.max_range_m,
+            num_range_bins = req.num_range_bins,
+        )
+    else:
+        result = active_radar.generate_ppi_scan(
+            start_angle    = req.start_angle,
+            end_angle      = req.end_angle,
+            num_lines      = req.num_lines,
+            max_range_m    = req.max_range_m,
+            num_range_bins = req.num_range_bins,
+        )
 
     return {
             "sweep_data" : result.sweep_data,

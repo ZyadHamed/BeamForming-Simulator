@@ -175,6 +175,7 @@ export class BeamformingService {
     end_angle: number;
     num_lines: number;
     max_range_m: number;
+    num_range_bins: number;
     targets: {
       target_id: string;
       x_m: number;
@@ -182,6 +183,7 @@ export class BeamformingService {
       velocity_m_s: number;
       rcs_sqm: number;
     }[];
+    radar_type: 'phased_array' | 'traditional';
   }): Observable<{ sweep_data: { angle_deg: number; range_bins: number[] }[]; detections: any[] }> {
     return this.http.post<{
       sweep_data: { angle_deg: number; range_bins: number[] }[];

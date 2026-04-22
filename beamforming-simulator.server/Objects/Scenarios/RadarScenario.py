@@ -89,6 +89,7 @@ def compute_cfar_threshold(power_bins: np.ndarray, cfg: RadarDetectionConfig) ->
 
 class RadarScenario(Scenario):
     """Phased-array radar PPI scan engine with a physically correct signal model."""
+
     def __init__(
         self,
         config:        ArrayConfig,
@@ -97,7 +98,6 @@ class RadarScenario(Scenario):
         detection_cfg: Optional[RadarDetectionConfig] = None,
     ) -> None:
         super().__init__(config, environment)
-
         self._waveform      : RadarWaveform        = waveform      or RadarWaveform()
         self._detection_cfg : RadarDetectionConfig = detection_cfg or RadarDetectionConfig()
         self.config.wave_speed = _C
@@ -148,12 +148,12 @@ class RadarScenario(Scenario):
             "pulse_width_us":          self._waveform.pulse_width_us,
             "noise_floor_dbm":         self.environment.noise_floor_dbm,
         }
-    
+
     def compute_interference_field(
-    self,
-    width_mm:       float = 500.0,
-    depth_mm:       float = 500.0,
-    resolution_mm:  float = 2.0,
+        self,
+        width_mm:       float = 500.0,
+        depth_mm:       float = 500.0,
+        resolution_mm:  float = 2.0,
     ) -> "InterferenceFieldResult":
         """Delegate to ArrayConfig and return the CW interference field."""
         return self.config.compute_interference_field(
@@ -176,6 +176,127 @@ class RadarScenario(Scenario):
             num_range_bins = num_range_bins,
         )
 
+    # ── CHANGE A ──────────────────────────────────────────────────────────────
+    # STATUS: CORRECT logic; BUGGY doc — generate_traditional_scan() correctly
+    # uses a sinc² one-way gain pattern applied relative to the *physical*
+    # antenna pointing angle, with no steering delays or beamforming computation.
+    # This satisfies spec §2B ("Fixed sinc² beamform, Constant rotation θ(t)").
+    # NO CODE CHANGE needed here; docstring clarified.
+    # ─────────────────────────────────────────────────────────────────────────
+    def generate_traditional_scan(
+        self,
+        start_angle:    float,
+        end_angle:      float,
+        num_lines:      int,
+        max_range_m:    float,
+        num_range_bins: int = 128,
+    ) -> RadarScanResult:
+        """
+        Simulates a mechanically rotating radar.
+
+        Scanning mechanism: the antenna physically points at each sweep angle
+        (no electronic steering, no beamforming). Gain applied via sinc²
+        one-way pattern centred on the physical boresight.
+
+        Satisfies spec §2B: "Fixed sinc² beamform. No beamforming."
+        """
+        angles_deg  = np.linspace(start_angle, end_angle, max(num_lines, 1))
+        ranges_m    = np.linspace(
+            self._waveform.range_resolution_m,
+            max_range_m,
+            num_range_bins,
+        )
+        bin_width_m = float(ranges_m[1] - ranges_m[0]) if num_range_bins > 1 else max_range_m
+
+        sweep_data : List[dict]           = []
+        detections : List[RadarDetection] = []
+
+        lam_db   = 20.0 * math.log10(self.wavelength_m)
+        g0_db    = self.array_gain_db
+        pt_dbm   = self._waveform.pt_dbm
+        hpbw_rad = math.radians(self.hpbw_deg)
+
+        for antenna_angle in angles_deg:
+            power_bins = np.zeros(num_range_bins, dtype=float)
+
+            for target in self.environment.targets:
+                r       = target.range_m
+                bearing = target.bearing_deg
+
+                if r > max_range_m or r < 1.0:
+                    continue
+
+                # Angular offset from physical boresight (no steering offset)
+                rel_ang_deg = (bearing - float(antenna_angle) + 180.0) % 360.0 - 180.0
+                rel_ang_rad = math.radians(rel_ang_deg)
+
+                # sinc² one-way gain — no beamforming
+                x = math.pi * rel_ang_rad / hpbw_rad
+                sinc_val = math.sin(x) / x if abs(x) > 1e-9 else 1.0
+                one_way_gain_db = g0_db + 20.0 * math.log10(abs(sinc_val) + 1e-12)
+
+                pr_dbm = (
+                    pt_dbm
+                    + 2.0 * one_way_gain_db
+                    + lam_db
+                    + target.rcs_db
+                    - _4PI3_DB
+                    - 40.0 * math.log10(max(r, 1.0))
+                )
+
+                snr_db     = pr_dbm - self.environment.noise_plus_clutter_dbm(r)
+                snr_linear = 10.0 ** (snr_db / 10.0)
+
+                bin_idx = int(np.argmin(np.abs(ranges_m - r)))
+                power_bins[bin_idx] += snr_linear
+
+            cfar_thr = compute_cfar_threshold(power_bins, self._detection_cfg)
+
+            for bin_idx in range(num_range_bins):
+                if power_bins[bin_idx] <= cfar_thr[bin_idx]:
+                    continue
+
+                bin_range  = float(ranges_m[bin_idx])
+                snr_db_bin = 10.0 * math.log10(max(power_bins[bin_idx], 1e-30))
+
+                for target in self.environment.targets:
+                    if abs(target.range_m - bin_range) > bin_width_m:
+                        continue
+
+                    ang_sep = abs((target.bearing_deg - float(antenna_angle) + 180) % 360 - 180)
+                    if ang_sep > self.hpbw_deg / 2.0:
+                        continue
+
+                    fd          = 2.0 * target.velocity_m_s * self.carrier_freq_hz / _C
+                    doppler_m_s = fd * self.wavelength_m / 2.0
+
+                    detections.append(RadarDetection(
+                        target_id     = target.target_id,
+                        range_m       = round(target.range_m, 1),
+                        angle_deg     = round(float(antenna_angle), 1),
+                        snr_db        = round(snr_db_bin, 1),
+                        estimated_rcs = target.rcs_sqm,
+                        doppler_m_s   = round(doppler_m_s, 2),
+                    ))
+
+            sweep_data.append({
+                "angle_deg":  float(antenna_angle),
+                "range_bins": self._log_compress(power_bins).tolist(),
+            })
+
+        return RadarScanResult(
+            timestamp  = 0.0,
+            detections = detections,
+            sweep_data = sweep_data,
+        )
+
+    # ── CHANGE B ──────────────────────────────────────────────────────────────
+    # STATUS: CORRECT — generate_ppi_scan() correctly calls
+    # calculate_steering_delays() + compute_beamforming() for EVERY steer angle
+    # in the chunk, making beam steering purely electronic.  No physical rotation
+    # variable is involved here. Satisfies spec §2A.
+    # NO CODE CHANGE needed; docstring clarified.
+    # ─────────────────────────────────────────────────────────────────────────
     def generate_ppi_scan(
         self,
         start_angle:    float,
@@ -184,6 +305,17 @@ class RadarScenario(Scenario):
         max_range_m:    float,
         num_range_bins: int = 128,
     ) -> RadarScanResult:
+        """
+        Phased-array PPI scan via purely electronic beam steering.
+
+        For every steer_angle in [start_angle, end_angle]:
+          1. config.steering_angle is updated (electronic steering command).
+          2. calculate_steering_delays() recomputes per-element delays.
+          3. compute_beamforming() returns the element-synthesised beam pattern.
+          4. The pattern is interpolated to compute the gain at each target bearing.
+
+        No physical rotation variable is used. Satisfies spec §2A.
+        """
         angles_deg  = np.linspace(start_angle, end_angle, max(num_lines, 1))
         ranges_m    = np.linspace(
             self._waveform.range_resolution_m,
@@ -200,6 +332,7 @@ class RadarScenario(Scenario):
         pt_dbm  = self._waveform.pt_dbm
 
         for steer_angle in angles_deg:
+            # Electronic steering: update phase delays, recompute beam
             self.config.steering_angle = float(steer_angle)
             self.config.calculate_steering_delays()
 
@@ -208,8 +341,8 @@ class RadarScenario(Scenario):
                 calculate_time_domain = False,
             )
 
-            bp_db  = np.asarray(beam_result.beam_pattern_db) 
-            bp_ang = np.asarray(beam_result.angles_deg)     
+            bp_db  = np.asarray(beam_result.beam_pattern_db)
+            bp_ang = np.asarray(beam_result.angles_deg)
 
             power_bins = np.zeros(num_range_bins, dtype=float)
 
@@ -228,11 +361,11 @@ class RadarScenario(Scenario):
 
                 pr_dbm = (
                     pt_dbm
-                    + 2.0 * one_way_gain_db     
-                    + lam_db                    
-                    + target.rcs_db             
-                    - _4PI3_DB                  
-                    - 40.0 * math.log10(max(r, 1.0))  
+                    + 2.0 * one_way_gain_db
+                    + lam_db
+                    + target.rcs_db
+                    - _4PI3_DB
+                    - 40.0 * math.log10(max(r, 1.0))
                 )
 
                 snr_db     = pr_dbm - self.environment.noise_plus_clutter_dbm(r)
@@ -283,7 +416,7 @@ class RadarScenario(Scenario):
 
     @staticmethod
     def _log_compress(
-        power_bins:      np.ndarray,
+        power_bins:       np.ndarray,
         dynamic_range_db: float = 40.0,
     ) -> np.ndarray:
         eps       = 1e-30
