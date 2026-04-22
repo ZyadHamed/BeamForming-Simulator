@@ -378,36 +378,71 @@ export class Mode5gComponent implements OnInit, OnDestroy, AfterViewInit {
    * was drawn identically at 0–180°.  Now we rotate by (boresight + steering)
    * so each sector appears in its correct global direction.
    */
-  private _backendPatternToNorm(
-    scanDeg: number[],
-    patternDb: number[],
-    boresightDeg: number = 0,
-    steeringDeg: number = 0,
-  ): Array<[number, number]> {
-    // Convert dB → linear and normalise to [0, 1]
-    const linear = patternDb.map(db => Math.pow(10, db / 20));
-    const maxVal = Math.max(...linear, 1e-10);
-    const norm = linear.map(v => v / maxVal);
+private _backendPatternToNorm(
+  scanDeg: number[],
+  patternDb: number[],
+  boresightDeg: number = 0,
+  _steeringDeg: number = 0,  // already baked into amplitudes, unused
+): Array<[number, number]> {
 
-    // Global offset = sector boresight + current steering
-    const globalOffset = boresightDeg + steeringDeg;
+  // 1. dB → linear, normalise to [0,1]
+  const linear = patternDb.map(db => Math.pow(10, db / 20));
+  const maxVal  = Math.max(...linear, 1e-10);
+  const norm    = linear.map(v => v / maxVal);
 
-    const result: Array<[number, number]> = [];
-
-    // Front hemisphere: scanDeg[i] is –90…+90 relative to sector face
-    for (let i = 0; i < scanDeg.length; i++) {
-      const globalDeg = ((scanDeg[i] + globalOffset) % 360 + 360) % 360;
-      result.push([globalDeg, norm[i]]);
-    }
-
-    // Back hemisphere: mirror with strong attenuation (real back-lobe ≈ –20 dB)
-    for (let i = 0; i < scanDeg.length; i++) {
-      const backGlobalDeg = ((scanDeg[i] + globalOffset + 180) % 360 + 360) % 360;
-      result.push([backGlobalDeg, norm[i] * 0.05]);
-    }
-
-    return result.sort((a, b) => a[0] - b[0]);
+  // 2. Build a lookup: localDeg → normAmplitude
+  //    scanDeg runs –90…+90, so we can index directly
+  const localLookup = new Map<number, number>();
+  for (let i = 0; i < scanDeg.length; i++) {
+    localLookup.set(Math.round(scanDeg[i]), norm[i]);
   }
+
+  // 3. Emit one point per degree around the full 360° circle
+  const result: Array<[number, number]> = [];
+
+  for (let globalDeg = 0; globalDeg < 360; globalDeg++) {
+    // Convert global degree back to local sector frame
+    const localDeg = ((globalDeg - boresightDeg) % 360 + 360) % 360;
+
+    // Remap to –180…+180
+    const localSigned = localDeg > 180 ? localDeg - 360 : localDeg;
+
+    let amplitude: number;
+    if (localSigned >= -90 && localSigned <= 90) {
+      // Front hemisphere — interpolate from backend data
+      amplitude = this._interpolatePattern(localSigned, scanDeg, norm);
+    } else {
+      // Back hemisphere — find the mirrored front value and attenuate heavily
+      const mirroredLocal = localSigned > 0 ? 180 - localSigned : -180 - localSigned;
+      const clampedMirror = Math.max(-90, Math.min(90, mirroredLocal));
+      amplitude = this._interpolatePattern(clampedMirror, scanDeg, norm) * 0.05;
+    }
+
+    result.push([globalDeg, amplitude]);
+  }
+
+  return result;  // already sorted 0→359
+}
+
+/** Linear interpolation into the backend pattern array */
+private _interpolatePattern(
+  queryDeg: number,
+  scanDeg: number[],
+  norm: number[],
+): number {
+  // Clamp to valid range
+  if (queryDeg <= scanDeg[0]) return norm[0];
+  if (queryDeg >= scanDeg[scanDeg.length - 1]) return norm[norm.length - 1];
+
+  // Find bracketing indices
+  let lo = 0;
+  for (let i = 0; i < scanDeg.length - 1; i++) {
+    if (scanDeg[i] <= queryDeg && queryDeg <= scanDeg[i + 1]) { lo = i; break; }
+  }
+  const hi = lo + 1;
+  const t  = (queryDeg - scanDeg[lo]) / (scanDeg[hi] - scanDeg[lo]);
+  return norm[lo] * (1 - t) + norm[hi] * t;
+}
 
   /** Local ULA computation fallback (no backend required) */
   private _computePolarPatternLocal(ne: number, sm: number, sd: number, bd: number): Array<[number, number]> {

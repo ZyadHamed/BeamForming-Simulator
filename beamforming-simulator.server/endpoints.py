@@ -202,7 +202,7 @@ class VesselSpec(BaseModel):
     direction_z:            float = Field(..., description="Direction vector Z component")
     radius_mm:              float = Field(..., gt=0, description="Vessel radius (mm)")
     velocity_magnitude_mms: float = Field(..., description="Peak flow velocity (mm/s)")
-    num_blood_cells:        int   = Field(200, ge=10, le=2000)
+    num_blood_cells:        int   = Field(200, ge=10, le=4000)
     background_noise:       float = Field(0.01, gt=0, le=1.0)
 
 

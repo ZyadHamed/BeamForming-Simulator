@@ -118,7 +118,7 @@ export class ModeUltrasoundComponent implements OnInit, OnDestroy {
   vesselReady     = false;
   numScatterers   = 0;
 
-  arrayConfig: ArrayConfig = makeDefaultArrayConfig(16);
+  arrayConfig: ArrayConfig = makeDefaultArrayConfig(32);
   selectedPreset  = '';
   ultrasoundPresets: ScenarioPreset[] = PREDEFINED_SCENARIOS.filter(s => s.mode === 'ultrasound');
 
@@ -138,7 +138,7 @@ export class ModeUltrasoundComponent implements OnInit, OnDestroy {
 
   /* ── shared probe spec ──────────────────────────────────────── */
   probe: ProbeSpec = {
-    num_elements: 16, pitch_mm: .5, frequency_mhz: 5,
+    num_elements: 32, pitch_mm: .2, frequency_mhz: 5,
     focus_depth_mm: 40, speed_of_sound_mm_us: 1.54,
     snr_db: 50, apodization_window: 'hamming', geometry: 'linear',
   };
@@ -227,17 +227,23 @@ export class ModeUltrasoundComponent implements OnInit, OnDestroy {
         background_noise: 0.01,
       } as VesselSpec,
     } as CreateVesselReq).subscribe({
-      next: () => { this.vesselReady = true; this.clearLoading(); },
+      next: () => { 
+        this.vesselReady = true; 
+        this.clearLoading();
+        this.cdr.detectChanges();},
       error: e => this.setError(e),
     });
   }
 
   // ── scans ─────────────────────────────────────────────────────
-  runScan() {
-    if (this.scanMode === 'a-mode')  return this.runAMode();
-    if (this.scanMode === 'b-mode')  return this.runBMode();
-    if (this.scanMode === 'doppler') return this.dopplerMode === 'line' ? this.runDopplerLine() : this.runColorDoppler();
+runScan() {
+  if (this.scanMode === 'a-mode')  return this.runAMode();
+  if (this.scanMode === 'b-mode')  return this.runBMode();
+  if (this.scanMode === 'doppler') {
+    this.cdr.detectChanges();   // <-- ADD (ensure Doppler canvas exists in DOM before drawing)
+    return this.dopplerMode === 'line' ? this.runDopplerLine() : this.runColorDoppler();
   }
+}
 
   private runAMode() {
     if (!this.scenarioReady) { this.errMsg = 'Create scenario first'; this.cdr.markForCheck(); return; }
@@ -277,7 +283,11 @@ export class ModeUltrasoundComponent implements OnInit, OnDestroy {
       prf_hz:       this.dPrf,
       packet_size:  this.dPkt,
     }).subscribe({
-      next: r => { this.dLineData = r; this.clearLoading(); this.drawDoppler(); },
+      next: r => { 
+        this.dLineData = r; 
+        this.clearLoading(); 
+        this.drawDoppler();
+      this.cdr.detectChanges(); },
       error: e => this.setError(e),
     });
   }
@@ -294,7 +304,12 @@ export class ModeUltrasoundComponent implements OnInit, OnDestroy {
       prf_hz:       this.dPrf,
       packet_size:  this.dPkt,
     }).subscribe({
-      next: r => { this.cDopplerData = r; this.clearLoading(); this.drawDoppler(); },
+      next: r => { 
+        this.cDopplerData = r; 
+        this.clearLoading(); 
+        this.drawDoppler(); 
+      this.cdr.detectChanges();
+      },
       error: e => this.setError(e),
     });
   }
@@ -773,7 +788,7 @@ export class ModeUltrasoundComponent implements OnInit, OnDestroy {
         const vel = d.velocity_grid[li][di], pow = d.power_grid[li][di];
         if (pow < .05) continue;
         const norm = Math.min(1, Math.abs(vel)/maxV), alpha = Math.min(1, pow*1.5);
-        const r = vel>0?Math.round(255*norm):0, g = Math.round(60*(1-norm)), b = vel>0?0:Math.round(255*norm);
+        const r = vel>0?Math.round(255*norm):0, g = 0, b = vel>0?0:Math.round(255*norm);
         ctx.fillStyle = `rgba(${r},${g},${b},${alpha.toFixed(2)})`;
         ctx.beginPath();
         ctx.moveTo(ox+r1*Math.sin(a1), oy+r1*Math.cos(a1));
@@ -787,7 +802,7 @@ export class ModeUltrasoundComponent implements OnInit, OnDestroy {
     const barX = W-30, barY = 30, barH = H-80;
     for (let i = 0; i < barH; i++) {
       const v = (1-i/barH-.5)*2;
-      ctx.fillStyle = v>0 ? `rgb(${Math.round(255*v)},${Math.round(60*(1-v))},0)` : `rgb(0,${Math.round(60*(1+v))},${Math.round(-255*v)})`;
+      ctx.fillStyle = v>0 ? `rgb(${Math.round(255*v)},0,0)` : `rgb(0,0,${Math.round(-255*v)})`;
       ctx.fillRect(barX, barY+i, 14, 1);
     }
     ctx.fillStyle = 'rgba(200,210,220,.6)'; ctx.font = '8px IBM Plex Mono,monospace'; ctx.textAlign = 'left';

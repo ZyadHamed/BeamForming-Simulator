@@ -8,13 +8,13 @@
         <button class="mode-btn" [class.active]="scanMode==='b-mode'"  (click)="scanMode='b-mode'">B-Mode</button>
         <button class="mode-btn" [class.active]="scanMode==='doppler'" (click)="scanMode='doppler'">Doppler</button>
       </div>
-      <div class="preset-bar" *ngIf="ultrasoundPresets.length">
+      <!--div class="preset-bar" *ngIf="ultrasoundPresets.length">
         <span class="preset-label">Preset</span>
         <select class="styled-select" [(ngModel)]="selectedPreset" (ngModelChange)="loadPreset($event)">
           <option value="">— Select —</option>
           <option *ngFor="let p of ultrasoundPresets" [value]="p.name">{{ p.name }}</option>
         </select>
-      </div>
+      </div-->
     </div>
 
     <div class="toolbar-right">

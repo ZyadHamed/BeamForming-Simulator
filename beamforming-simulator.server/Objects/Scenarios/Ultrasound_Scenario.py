@@ -201,7 +201,8 @@ class UltrasoundScenario(Scenario):
         num_lines: int,
         max_depth_mm: float,
         prf_hz: float = 4000.0,
-        packet_size: int = 8
+        packet_size: int = 8,
+        power_threshold_db: float = 15.0
     ) -> ColorDopplerResult:
         """
         Generates a 2D Color Doppler image by sweeping the Doppler packet across a sector.
@@ -238,10 +239,11 @@ class UltrasoundScenario(Scenario):
         # Clip to a dynamic range (e.g., 40 dB)
         dynamic_range = 40.0
         power_intensities = np.clip(power_db + dynamic_range, 0, dynamic_range)
-
+        velocity_matrix = np.array(velocity_grid)
+        velocity_matrix[power_intensities < power_threshold_db] = 0.0
         return ColorDopplerResult(
             sector_angles_deg=sector_angles.tolist(),
             axial_depths_mm=axial_depths,
-            velocity_grid=velocity_grid, # Raw velocities in m/s
+            velocity_grid=velocity_matrix.tolist(), # Raw velocities in m/s
             power_grid=power_intensities.tolist() # Normalized dB power for thresholding
         )
