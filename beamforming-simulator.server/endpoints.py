@@ -54,6 +54,19 @@ class ElementInput(BaseModel):
     intensity: float
     enabled: bool
 
+
+class ProbeSpec(BaseModel):
+    num_elements:         int   = Field(16,      ge=4,   le=256)
+    pitch_mm:             float = Field(0.5,     gt=0)
+    frequency_mhz:        float = Field(5.0,     gt=0)
+    focus_depth_mm:       float = Field(40.0,    gt=0)
+    speed_of_sound_mm_us: float = Field(1.54,    gt=0)
+    snr_db:               float = Field(50.0)
+    apodization_window:   str   = Field("hamming")
+    geometry:             str   = Field("linear")
+
+
+
 class BeamSpecs(BaseModel):
     num_elements: int
     element_spacing: float
@@ -191,17 +204,6 @@ class ColorDopplerResponse(BaseModel):
     axial_depths_mm:   List[float]
     velocity_grid:     List[List[float]]
     power_grid:        List[List[float]]
-
-class ProbeSpec(BaseModel):
-    num_elements:         int   = Field(16,      ge=4,   le=256)
-    pitch_mm:             float = Field(0.5,     gt=0)
-    frequency_mhz:        float = Field(5.0,     gt=0)
-    focus_depth_mm:       float = Field(40.0,    gt=0)
-    speed_of_sound_mm_us: float = Field(1.54,    gt=0)
-    snr_db:               float = Field(50.0)
-    apodization_window:   str   = Field("hamming")
-    geometry:             str   = Field("linear")
-
 
 class CreateScenarioRequest(BaseModel):
     session_id:          str
