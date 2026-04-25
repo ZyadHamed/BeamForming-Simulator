@@ -41,7 +41,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-#py -m uvicorn endpoints:main --reload
+#py -m uvicorn endpoints:app --reload
 # ── Pydantic Models ────────────────────────────────────────────────
 
 class ElementInput(BaseModel):
@@ -116,64 +116,6 @@ _sessions: Dict[str, UltrasoundScenario] = {}
 # ============================================================
 # SECTION 6 – Pydantic request / response models
 # ============================================================
-
-class ProbeSpec(BaseModel):
-    num_elements:         int   = Field(16,      ge=4,   le=256)
-    pitch_mm:             float = Field(0.5,     gt=0)
-    frequency_mhz:        float = Field(5.0,     gt=0)
-    focus_depth_mm:       float = Field(40.0,    gt=0)
-    speed_of_sound_mm_us: float = Field(1.54,    gt=0)
-    snr_db:               float = Field(50.0)
-    apodization_window:   str   = Field("hamming")
-    geometry:             str   = Field("linear")
-
-
-class CreateScenarioRequest(BaseModel):
-    session_id:          str
-    probe:               ProbeSpec
-    use_shepp_logan:     bool = True
-    shepp_logan_scale_mm: float = Field(60.0, gt=0, description="Physical size of the Shepp-Logan phantom")
-    phantom_spec:        Optional[PhantomSpec] = None
-
-
-class CreateScenarioResponse(BaseModel):
-    session_id: str
-    num_scatterers: int
-    message: str
-
-
-class AModeRequest(BaseModel):
-    session_id: str
-    angle_deg:   float = Field(..., ge=-90, le=90)
-    max_depth_mm: float = Field(80.0, gt=0)
-
-
-class AModeResponse(BaseModel):
-    angle_deg:   float
-    depths_mm:   List[float]
-    amplitudes:  List[float]
-
-
-class BModeRequest(BaseModel):
-    session_id:   str
-    start_angle:  float = Field(-30.0, ge=-90)
-    end_angle:    float = Field( 30.0, le= 90)
-    num_lines:    int   = Field(35,    ge=1, le=256)
-    max_depth_mm: float = Field(80.0,  gt=0)
-
-
-class BModeResponse(BaseModel):
-    sector_angles_deg: List[float]
-    axial_depths_mm:   List[float]
-    image_grid:        List[List[float]]   # shape: [num_lines][num_depth_samples]
-
-
-class DefaultBModeRequest(BaseModel):
-    session_id:   str
-    max_depth_mm: float = Field(80.0, gt=0)
-
-
-
 class TissueRegionSpec(BaseModel):
     name:                     str
     center_x:                 float = Field(..., description="Lateral centre (mm)")
@@ -249,6 +191,64 @@ class ColorDopplerResponse(BaseModel):
     axial_depths_mm:   List[float]
     velocity_grid:     List[List[float]]
     power_grid:        List[List[float]]
+
+class ProbeSpec(BaseModel):
+    num_elements:         int   = Field(16,      ge=4,   le=256)
+    pitch_mm:             float = Field(0.5,     gt=0)
+    frequency_mhz:        float = Field(5.0,     gt=0)
+    focus_depth_mm:       float = Field(40.0,    gt=0)
+    speed_of_sound_mm_us: float = Field(1.54,    gt=0)
+    snr_db:               float = Field(50.0)
+    apodization_window:   str   = Field("hamming")
+    geometry:             str   = Field("linear")
+
+
+class CreateScenarioRequest(BaseModel):
+    session_id:          str
+    probe:               ProbeSpec
+    use_shepp_logan:     bool = True
+    shepp_logan_scale_mm: float = Field(60.0, gt=0, description="Physical size of the Shepp-Logan phantom")
+    phantom_spec:        Optional[PhantomSpec] = None
+
+
+class CreateScenarioResponse(BaseModel):
+    session_id: str
+    num_scatterers: int
+    message: str
+
+
+class AModeRequest(BaseModel):
+    session_id: str
+    angle_deg:   float = Field(..., ge=-90, le=90)
+    max_depth_mm: float = Field(80.0, gt=0)
+
+
+class AModeResponse(BaseModel):
+    angle_deg:   float
+    depths_mm:   List[float]
+    amplitudes:  List[float]
+
+
+class BModeRequest(BaseModel):
+    session_id:   str
+    start_angle:  float = Field(-30.0, ge=-90)
+    end_angle:    float = Field( 30.0, le= 90)
+    num_lines:    int   = Field(35,    ge=1, le=256)
+    max_depth_mm: float = Field(80.0,  gt=0)
+
+
+class BModeResponse(BaseModel):
+    sector_angles_deg: List[float]
+    axial_depths_mm:   List[float]
+    image_grid:        List[List[float]]   # shape: [num_lines][num_depth_samples]
+
+
+class DefaultBModeRequest(BaseModel):
+    session_id:   str
+    max_depth_mm: float = Field(80.0, gt=0)
+
+
+
 
 
 
