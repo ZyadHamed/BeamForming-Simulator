@@ -41,6 +41,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+#py -m uvicorn endpoints:main --reload
 # ── Pydantic Models ────────────────────────────────────────────────
 
 class ElementInput(BaseModel):
