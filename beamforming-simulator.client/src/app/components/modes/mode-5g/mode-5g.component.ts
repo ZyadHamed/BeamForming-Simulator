@@ -55,6 +55,8 @@ export class Mode5gComponent implements OnInit, OnDestroy, AfterViewInit {
 
   @ViewChild('envCanvas', { static: true }) envCanvasRef!: ElementRef<HTMLCanvasElement>;
   @ViewChild('polarCanvas', { static: false }) polarCanvasRef!: ElementRef<HTMLCanvasElement>;
+@ViewChild('liveBeamCanvas', { static: false })
+liveBeamCanvasRef!: ElementRef<HTMLCanvasElement>;
 
   towers: Tower[] = [];
   users: MobileUser[] = [];
@@ -225,6 +227,17 @@ export class Mode5gComponent implements OnInit, OnDestroy, AfterViewInit {
     });
   }
 
+  get liveBeamTower(): Tower | null {
+  if (!this.selectedUserId) return null;
+  const user = this.users.find(u => u.id === this.selectedUserId);
+  if (!user?.connectedTowerId) return null;
+  return this.towers.find(t => t.id === user.connectedTowerId) ?? null;
+}
+
+get liveBeamUser(): MobileUser | null {
+  return this.users.find(u => u.id === this.selectedUserId) ?? null;
+}
+
   // ── Backend sync ───────────────────────────────────────────────
 
   private syncTowersToBackend(): void {
@@ -242,7 +255,7 @@ export class Mode5gComponent implements OnInit, OnDestroy, AfterViewInit {
   private syncUsersToBackend(): void {
     if (!this.towersInitialized || !this.users.length) return;
     const payload: User5GRequest[] = this.users.map(u => ({
-      user_id: u.id, x_m: u.x / PX_PER_METER, y_m: u.y / PX_PER_METER, allocated_frequency_mhz: 3500,
+      user_id: u.id, x_m: u.x / PX_PER_METER, y_m: u.y / PX_PER_METER, allocated_frequency_mhz: 3500,  current_tower_id: u.connectedTowerId ?? null,  // ADD THIS
     }));
     this.service.updateUsers(payload).subscribe({
       next: r => this.applyNetworkResult(r),
@@ -275,6 +288,7 @@ export class Mode5gComponent implements OnInit, OnDestroy, AfterViewInit {
     });
 
     this.fetchBeamDataForTowers();
+    this.redrawLiveBeam();  
     this.cdr.markForCheck();
   }
 
@@ -526,9 +540,155 @@ private _interpolatePattern(
       this.framesSinceSync++;
       if (this.framesSinceSync >= this.SYNC_EVERY_N_FRAMES) {
         this.framesSinceSync = 0; this.syncUsersToBackend();
+          this.redrawLiveBeam(); // ADD THIS
       } else { this.updateConnectionsLocal(); }
     }
   }
+
+  redrawLiveBeam(): void {
+  setTimeout(() => {
+    const canvas = this.liveBeamCanvasRef?.nativeElement;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const SIZE = canvas.width = canvas.height = 200;
+    ctx.clearRect(0, 0, SIZE, SIZE);
+    const cx = SIZE / 2, cy = SIZE / 2, R = SIZE / 2 - 20;
+
+    const tower = this.liveBeamTower;
+    const user = this.liveBeamUser;
+
+    // ── Grid ──────────────────────────────────────────────────────
+    ctx.strokeStyle = 'rgba(180,180,180,0.35)';
+    ctx.lineWidth = 0.5;
+    [0.25, 0.5, 0.75, 1].forEach(f => {
+      ctx.beginPath();
+      ctx.arc(cx, cy, R * f, 0, Math.PI * 2);
+      ctx.stroke();
+    });
+    for (let deg = 0; deg < 360; deg += 30) {
+      const r = (deg * Math.PI) / 180;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + R * Math.cos(r), cy + R * Math.sin(r));
+      ctx.stroke();
+    }
+
+    // dB labels
+    ctx.fillStyle = '#999';
+    ctx.font = '7px IBM Plex Mono,monospace';
+    ctx.textAlign = 'center';
+    ['-10', '-20', '-30'].forEach((l, i) =>
+      ctx.fillText(`${l}dB`, cx + 4, cy - R * (0.75 - i * 0.25) - 2)
+    );
+
+    // Cardinal labels
+    [['N', 0], ['E', 90], ['S', 180], ['W', 270]].forEach(([l, d]) => {
+      const r = ((+d - 90) * Math.PI) / 180;
+      ctx.fillText(String(l), cx + (R + 12) * Math.cos(r), cy + (R + 12) * Math.sin(r) + 3);
+    });
+
+    if (!tower) {
+      ctx.fillStyle = '#aaa';
+      ctx.font = '11px IBM Plex Mono,monospace';
+      ctx.fillText('No connection', cx, cy);
+      return;
+    }
+
+    // ── All 3 sectors ─────────────────────────────────────────────
+    this.sectorNames.forEach(sn => {
+      const bo = SECTOR_BORESIGHTS[sn] ?? 0;
+      const col = SECTOR_COLORS[sn];
+      const isActive = sn === user?.sector_name;   // highlight the UE's sector
+      const steerDeg = tower.sectorAngles[sn] ?? 0;
+
+      const backendSector = tower.beamData?.sectors.find(s => s.name === sn);
+      const hasValidBackendPattern = backendSector != null &&
+        Math.max(...backendSector.beam_pattern_db) > -80;
+
+      const pattern = hasValidBackendPattern
+        ? this._backendPatternToNorm(
+            backendSector!.scan_angles_deg,
+            backendSector!.beam_pattern_db,
+            bo,
+            steerDeg,
+          )
+        : this._computePolarPatternLocal(
+            tower.array.numElements,
+            tower.array.elementSpacing,
+            steerDeg,
+            bo,
+          );
+
+      ctx.beginPath();
+      ctx.strokeStyle = col + (isActive ? 'ff' : '55');
+      ctx.lineWidth = isActive ? 2 : 1;
+      pattern.forEach(([angleDeg, ampNorm], i) => {
+        const r = R * Math.max(0, ampNorm);
+        const rd = ((angleDeg - 90) * Math.PI) / 180;
+        i === 0
+          ? ctx.moveTo(cx + r * Math.cos(rd), cy + r * Math.sin(rd))
+          : ctx.lineTo(cx + r * Math.cos(rd), cy + r * Math.sin(rd));
+      });
+      ctx.closePath();
+      if (isActive) {
+        ctx.fillStyle = col + '1e';
+        ctx.fill();
+      }
+      ctx.stroke();
+
+      // Steering arrow
+      const ar = ((steerDeg + bo - 90) * Math.PI) / 180;
+      ctx.beginPath();
+      ctx.strokeStyle = col + (isActive ? 'dd' : '66');
+      ctx.lineWidth = isActive ? 1.5 : 0.8;
+      ctx.setLineDash([3, 3]);
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + R * 0.88 * Math.cos(ar), cy + R * 0.88 * Math.sin(ar));
+      ctx.stroke();
+      ctx.setLineDash([]);
+    });
+
+    // ── UE direction marker ───────────────────────────────────────
+    // Draw a small triangle pointing toward the actual UE angle
+    if (user?.connectedTowerId && user.local_beam_angle != null) {
+      const globalPointingDeg =
+        (user.local_beam_angle + (SECTOR_BORESIGHTS[user.sector_name] ?? 0));
+      const ueRad = ((globalPointingDeg - 90) * Math.PI) / 180;
+      const tipX = cx + (R + 6) * Math.cos(ueRad);
+      const tipY = cy + (R + 6) * Math.sin(ueRad);
+      const leftRad = ueRad - Math.PI / 2;
+      const rightRad = ueRad + Math.PI / 2;
+      const sideLen = 5;
+
+      ctx.beginPath();
+      ctx.moveTo(tipX, tipY);
+      ctx.lineTo(tipX - sideLen * Math.cos(leftRad), tipY - sideLen * Math.sin(leftRad));
+      ctx.lineTo(tipX - sideLen * Math.cos(rightRad), tipY - sideLen * Math.sin(rightRad));
+      ctx.closePath();
+      ctx.fillStyle = SECTOR_COLORS[user.sector_name] ?? '#fff';
+      ctx.fill();
+    }
+
+    // ── Legend ────────────────────────────────────────────────────
+    this.sectorNames.forEach((n, i) => {
+      ctx.fillStyle = SECTOR_COLORS[n];
+      ctx.font = '8px IBM Plex Mono,monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(
+        `${n}: θ=${(tower.sectorAngles[n] ?? 0).toFixed(1)}°`,
+        5, 11 + i * 12
+      );
+    });
+
+    // Data source badge
+    ctx.fillStyle = '#bbb';
+    ctx.font = '7px IBM Plex Mono,monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(tower.beamData ? '⬆ backend' : '⚙ local', SIZE - 4, SIZE - 4);
+  });
+}
 
   private updateConnectionsLocal(): void {
     this.users.forEach(user => {

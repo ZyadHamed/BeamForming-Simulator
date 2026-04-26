@@ -6,9 +6,10 @@ from Objects.Scenarios.Scenario import Scenario
 @dataclass
 class UserEquipment:
     user_id: str
-    x_m: float  
-    y_m: float  
-    allocated_frequency_mhz: float 
+    x_m: float
+    y_m: float
+    allocated_frequency_mhz: float
+    current_tower_id: str | None = None  # ADD THIS
 
 @dataclass
 class LinkQuality:
@@ -110,46 +111,62 @@ class Telecom5GScenario:
         self.channel_bandwidth_mhz = 100.0  
 
     def assign_users_to_sectors(self):
-        """Assigns users to the closest tower, and then to the correct array panel."""
-        # Structure: assignments[Tower][Sector] = [(User, Distance, Global_Angle, Local_Angle)]
         assignments = {t: {s: [] for s in t.sectors} for t in self.towers}
         dropped_users = []
 
         for user in self.users:
-            # 1. Find Closest Tower
-            closest_tower = None
-            min_dist = float('inf')
-            for tower in self.towers:
-                dist = math.sqrt((user.x_m - tower.x_m)**2 + (user.y_m - tower.y_m)**2)
-                if dist < min_dist and dist <= tower.max_coverage_radius_m:
-                    min_dist = dist
-                    closest_tower = tower
-            
-            if not closest_tower:
+            dx_list = [(t, math.sqrt((user.x_m - t.x_m)**2 + (user.y_m - t.y_m)**2))
+                    for t in self.towers]
+
+            # ── Sticky logic ──────────────────────────────────────────
+            # If the user has a current tower, check if they're still in range of it.
+            # If yes, lock them to it regardless of whether a closer tower exists.
+            assigned_tower = None
+            if user.current_tower_id:
+                current_tower = next((t for t in self.towers if t.tower_id == user.current_tower_id), None)
+                if current_tower:
+                    dist_to_current = math.sqrt(
+                        (user.x_m - current_tower.x_m)**2 + (user.y_m - current_tower.y_m)**2
+                    )
+                    if dist_to_current <= current_tower.max_coverage_radius_m:
+                        assigned_tower = current_tower  # sticky — stay put
+
+            # ── Normal assignment (new user or current tower lost) ────
+            if not assigned_tower:
+                min_dist = float('inf')
+                for tower, dist in dx_list:
+                    if dist < min_dist and dist <= tower.max_coverage_radius_m:
+                        min_dist = dist
+                        assigned_tower = tower
+
+            if not assigned_tower:
                 dropped_users.append(user.user_id)
                 continue
-                
-            # 2. Find Correct Sector (Alpha, Beta, or Gamma)
-            dx = user.x_m - closest_tower.x_m
-            dy = user.y_m - closest_tower.y_m
+
+            # ── Sector selection (unchanged) ──────────────────────────
+            dx = user.x_m - assigned_tower.x_m
+            dy = user.y_m - assigned_tower.y_m
             global_angle = math.degrees(math.atan2(dx, dy))
-            
+
             best_sector = None
             min_angle_diff = float('inf')
             local_angle = 0.0
-            
-            for sector in closest_tower.sectors:
-                # Wrap the angular difference to be between -180 and +180
+
+            for sector in assigned_tower.sectors:
                 diff = (global_angle - sector.boresight_angle_deg + 180) % 360 - 180
                 if abs(diff) < min_angle_diff:
                     min_angle_diff = abs(diff)
                     best_sector = sector
                     local_angle = diff
-                    
-            assignments[closest_tower][best_sector].append((user, min_dist, global_angle, local_angle))
+
+            assignments[assigned_tower][best_sector].append(
+                (user, math.sqrt((user.x_m - assigned_tower.x_m)**2 + (user.y_m - assigned_tower.y_m)**2),
+                global_angle, local_angle)
+            )
 
         return assignments, dropped_users
-
+    
+    
     def compute_superimposed_beam_pattern(self, sector: TowerSector, local_angles_deg: List[float]):
         """
         Calculates MU-MIMO beam pattern for a SINGLE sector panel.

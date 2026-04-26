@@ -81,6 +81,7 @@ export interface User5GRequest {
   x_m: number;
   y_m: number;
   allocated_frequency_mhz: number;
+  current_tower_id: string | null;
 }
 
 export interface LinkQuality {

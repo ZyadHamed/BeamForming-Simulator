@@ -91,7 +91,7 @@ export class BeamBuilderComponent implements AfterViewInit, OnDestroy {
     geometry         : 'linear',
     curvature_radius : 50,
     apodization      : 'hanning',
-    wave_speed       : 1540,
+    wave_speed       : 1.54,
     snr              : 60,
   };
 
