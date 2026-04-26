@@ -50,7 +50,6 @@ class RadarDetection:
     angle_deg:     float
     snr_db:        float
     estimated_rcs: float
-    doppler_m_s:   float
 
 
 @dataclass
@@ -342,6 +341,13 @@ class RadarScenario(Scenario):
                 bin_idx = int(np.argmin(np.abs(ranges_m - r)))
                 power_bins[bin_idx] += snr_linear
                 _target_meta[target.target_id] = (pr_dbm, one_way_gain_db)
+            
+            if self.config.snr < 1000.0:
+                noise_std = 10 ** (-self.config.snr / 20.0)
+                power_bins = np.clip(
+                    power_bins + np.random.normal(0, noise_std * float(np.max(power_bins) + 1e-30), power_bins.shape),
+                    0, None,
+                )
 
             cfar_thr = compute_cfar_threshold(power_bins, self._detection_cfg)
 
@@ -359,9 +365,6 @@ class RadarScenario(Scenario):
                     ang_sep = abs((target.bearing_deg - float(antenna_angle) + 180) % 360 - 180)
                     if ang_sep > self.hpbw_deg / 2.0:
                         continue
-
-                    fd          = 2.0 * target.velocity_m_s * self.carrier_freq_hz / _C
-                    doppler_m_s = fd * self.wavelength_m / 2.0
 
                     # Estimate range from bin index, not ground-truth position
                     estimated_range_m = bin_idx * self._waveform.range_resolution_m
@@ -384,7 +387,6 @@ class RadarScenario(Scenario):
                         angle_deg     = round(float(antenna_angle), 1),
                         snr_db        = round(snr_db_bin, 1),
                         estimated_rcs = round(estimated_rcs, 3),
-                        doppler_m_s   = round(doppler_m_s, 2),
                     ))
 
             compressed = self._log_compress(power_bins, noise_floor_db=self.environment.noise_floor_dbm,)
@@ -448,7 +450,6 @@ class RadarScenario(Scenario):
                 for offset in face_offsets
             ]
             results = [f.result() for f in futures]
-
         sweep_data: List[dict]           = []
         detections: List[RadarDetection] = []
         detected_ids: set                = set()
@@ -557,6 +558,9 @@ class RadarScenario(Scenario):
 
                 cfar_thr = compute_cfar_threshold(power_bins, self._detection_cfg)
 
+                pr_dbm = self.environment.noise_floor_dbm
+                one_way_gain_db = g0_db
+
                 for bin_idx in range(num_range_bins):
                     if power_bins[bin_idx] <= cfar_thr[bin_idx]:
                         continue
@@ -584,16 +588,12 @@ class RadarScenario(Scenario):
                             / (pt_lin * g_lin ** 2 * lam ** 2)
                         )
 
-                        fd          = 2.0 * target.velocity_m_s * self.carrier_freq_hz / _C
-                        doppler_m_s = fd * self.wavelength_m / 2.0
-
                         detections.append(RadarDetection(
                             target_id     = target.target_id,
                             range_m       = round(estimated_range_m, 1),
                             angle_deg     = round(global_steer, 1),
                             snr_db        = round(snr_db_bin, 1),
                             estimated_rcs = round(estimated_rcs, 3),
-                            doppler_m_s   = round(doppler_m_s, 2),
                         ))
 
                 compressed = self._log_compress(power_bins, noise_floor_db=self.environment.noise_floor_dbm,)
@@ -773,10 +773,20 @@ class RadarScenario(Scenario):
                 snr_db     = pr_dbm - self.environment.noise_plus_clutter_dbm(r)
                 snr_linear = 10.0 ** (snr_db / 10.0)
 
+                if self.config.snr < 1000.0:
+                    noise_std = 10 ** (-self.config.snr / 20.0)
+                    power_bins = np.clip(
+                        power_bins + np.random.normal(0, noise_std * float(np.max(power_bins) + 1e-30), power_bins.shape),
+                        0, None,
+                    )
+
                 bin_idx = int(np.argmin(np.abs(ranges_m - r)))
                 power_bins[bin_idx] += snr_linear
 
             cfar_thr = compute_cfar_threshold(power_bins, self._detection_cfg)
+
+            pr_dbm = self.environment.noise_floor_dbm
+            one_way_gain_db = g0_db
 
             for bin_idx in range(num_range_bins):
                 if power_bins[bin_idx] <= cfar_thr[bin_idx]:
@@ -805,16 +815,12 @@ class RadarScenario(Scenario):
                         / (pt_lin * g_lin ** 2 * lam ** 2)
                     )
 
-                    fd          = 2.0 * target.velocity_m_s * self.carrier_freq_hz / _C
-                    doppler_m_s = fd * self.wavelength_m / 2.0
-
                     detections.append(RadarDetection(
                         target_id     = target.target_id,
                         range_m       = round(estimated_range_m, 1),
                         angle_deg     = round(global_steer, 1),
                         snr_db        = round(snr_db_bin, 1),
                         estimated_rcs = round(estimated_rcs, 3),
-                        doppler_m_s   = round(doppler_m_s, 2),
                     ))
 
             compressed = self._log_compress(power_bins, noise_floor_db=self.environment.noise_floor_dbm,)
