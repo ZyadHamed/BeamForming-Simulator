@@ -287,7 +287,8 @@ runScan() {
         this.dLineData = r; 
         this.clearLoading(); 
         this.drawDoppler();
-      this.cdr.detectChanges(); },
+      this.cdr.detectChanges(); 
+    },
       error: e => this.setError(e),
     });
   }
