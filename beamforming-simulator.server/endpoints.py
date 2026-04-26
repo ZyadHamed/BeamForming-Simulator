@@ -775,8 +775,7 @@ def _compute_sector_pattern(sector, local_angles_deg: list):
 
 # --- Radar State ---
 active_radar: Optional[RadarScenario] = None
-_frame_counter: int = 0
-INTERFERENCE_EVERY_N_FRAMES = 60  # recompute ~every 30 scan slices
+INTERFERENCE_EVERY_N_FRAMES = 30  # recompute ~every N scan slices
 _radar_lock = asyncio.Lock()  
 
 # --- Radar DTOs ---
@@ -907,6 +906,35 @@ def _build_array_config(req: RadarSetupRequest) -> ArrayConfig:
 
     return config
 
+# REPLACE _compute_and_send_interference (lines 295–319) WITH:
+def _compute_interference_only(radar) -> dict:
+    """CPU-bound interference + beamforming computation. No I/O. Returns a plain dict."""
+    try:
+        n_el     = len([e for e in radar.config.elements if e.enabled])
+        aperture = (n_el - 1) * radar.config.element_spacing
+        width_mm = max(aperture * 4, 100.0)
+        res_mm   = width_mm / 250.0
+
+        interference = radar.compute_interference_field(
+            width_mm      = width_mm,
+            depth_mm      = width_mm,
+            resolution_mm = res_mm,
+        )
+        bf_result = radar.compute_beamforming_4face()
+
+        return {
+            "interference_image": interference.image_base64,
+            "interference_cols":  interference.cols,
+            "interference_rows":  interference.rows,
+            "beam_pattern":       bf_result.beam_pattern_db,
+            "angles_deg":         bf_result.angles_deg,
+            "beam_angle":         bf_result.beam_angle,
+            "main_lobe_width":    bf_result.main_lobe_width,
+            "side_lobe_level":    bf_result.side_lobe_level,
+        }
+    except Exception:
+        return {}
+    
 @app.post("/radar/setup", response_model=RadarInfoResponse)
 def radar_setup(req: RadarSetupRequest):
     """
@@ -996,9 +1024,17 @@ def radar_setup(req: RadarSetupRequest):
 @app.websocket("/radar/scan")
 async def ws_radar_scan(websocket: WebSocket):
     await websocket.accept()
+    frame_counter = 0
     try:
         while True:
             raw = await websocket.receive_text()
+
+            # "READY" is sent by the client as the initial handshake kick
+            # and as the ack after drawing each batch. It carries no scan
+            # parameters, so we simply wait for the next real message.
+            if raw.strip() == "READY":
+                continue
+
             msg = json.loads(raw)
 
             if active_radar is None:
@@ -1017,7 +1053,7 @@ async def ws_radar_scan(websocket: WebSocket):
                         rcs_sqm      = t.rcs_sqm,
                     ) for t in req.targets
                 ]
-            
+
             async with _radar_lock:
                 if req.radar_type == 'traditional':
                     result = active_radar.generate_traditional_scan(
@@ -1036,39 +1072,56 @@ async def ws_radar_scan(websocket: WebSocket):
                         num_range_bins = req.num_range_bins,
                     )
 
-            global _frame_counter
-            _frame_counter += 1
+            frame_counter += 1
 
             payload: dict = {
                 "sweep_data": result.sweep_data,
                 "detections": [vars(d) for d in result.detections],
             }
 
-            if _frame_counter % INTERFERENCE_EVERY_N_FRAMES == 0:
-                n_el     = len([e for e in active_radar.config.elements if e.enabled])
-                aperture = (n_el - 1) * active_radar.config.element_spacing
-                width_mm = max(aperture * 4, 100.0)
-                res_mm   = width_mm / 250.0
-
-                interference = active_radar.compute_interference_field(
-                    width_mm      = width_mm,
-                    depth_mm      = width_mm,
-                    resolution_mm = res_mm,
+            # ── Interference field (every N frames, non-blocking) ──────────
+            if frame_counter % INTERFERENCE_EVERY_N_FRAMES == 0 and req.radar_type == 'phased_array':
+                loop = asyncio.get_event_loop()
+                interference_result = await loop.run_in_executor(
+                    None, _compute_interference_only, active_radar
                 )
-                bf_result = active_radar.compute_beamforming_4face()
+                if interference_result:
+                    payload.update(interference_result)
 
-                payload["interference_image"] = interference.image_base64
-                payload["interference_cols"]  = interference.cols
-                payload["interference_rows"]  = interference.rows
-                payload["beam_pattern"]       = bf_result.beam_pattern_db
-                payload["angles_deg"]         = bf_result.angles_deg
-                payload["beam_angle"]         = bf_result.beam_angle
-                payload["main_lobe_width"]    = bf_result.main_lobe_width
-                payload["side_lobe_level"]    = bf_result.side_lobe_level
+            # ── Focused scans (serialised, capped, lock-free across await) ──
+            if req.radar_type == 'phased_array' and result.detections:
+                MAX_FOCUSED_SCANS = 2
+                seen_angles: set[float] = set()
+                angles_to_scan: list[float] = []
+                for det in result.detections:
+                    rounded = round(det.angle_deg, 1)
+                    if rounded not in seen_angles:
+                        seen_angles.add(rounded)
+                        angles_to_scan.append(det.angle_deg)
+                    if len(angles_to_scan) >= MAX_FOCUSED_SCANS:
+                        break
+
+                seen_ids = {d["target_id"] for d in payload["detections"]}
+                for angle in angles_to_scan:
+                    # Run in executor WITHOUT holding _radar_lock across the await.
+                    # scan_focused snapshots and restores config in its own finally
+                    # block. The main scan for this frame is already complete so
+                    # there is no concurrent config mutation to guard against here.
+                    focused_result = await asyncio.get_event_loop().run_in_executor(
+                        None, active_radar.scan_focused, angle,
+                        req.max_range_m, req.num_range_bins,
+                    )
+                    payload["sweep_data"].extend(focused_result.sweep_data)
+                    for det in focused_result.detections:
+                        if det.target_id not in seen_ids:
+                            seen_ids.add(det.target_id)
+                            payload["detections"].append(vars(det))
 
             await websocket.send_text(json.dumps(payload))
+
     except WebSocketDisconnect:
         pass
+
 # # --- Pydantic Schemas for API I/O ---
 
 #     # ── Convert dataclass → plain dict for JSON serialization ──────
