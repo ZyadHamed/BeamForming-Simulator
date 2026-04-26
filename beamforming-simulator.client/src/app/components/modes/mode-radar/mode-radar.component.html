@@ -4,27 +4,21 @@
     <div class="ctrl-section">
       <div class="section-label">Scan Parameters</div>
 
-      <!--
-        CHANGE 4 (HTML): Renamed from "Scan Speed" (shared) to "PA Steer Speed"
-        (phased-array only). Traditional radar speed is a fixed physical constant
-        and must NOT be user-adjustable per the spec ("Constant rotation θ(t)").
-        The binding now references `bfScanSpeedDegPerFrame` instead of `scanSpeed`.
-      -->
       <div class="ctrl-group">
         <label class="ctrl-label">
           PA Steer Speed
-          <span class="val">{{ bfScanSpeedDegPerFrame | number: '1.1-1' }} °/frame</span>
+          <span class="val">{{ steerSpeedDegPerBatch | number: '1.0-0' }} °/batch</span>
         </label>
         <input
           type="range"
           class="styled-slider"
-          min="0.2"
-          max="5"
-          step="0.1"
-          [value]="bfScanSpeedDegPerFrame"
-          (input)="bfScanSpeedDegPerFrame = +$any($event.target).value"
+          min="1"
+          max="45"
+          step="1"
+          [value]="steerSpeedDegPerBatch"
+          (input)="steerSpeedDegPerBatch = +$any($event.target).value"
         />
-        <span class="ctrl-hint">Electronic steering frequency (PA only)</span>
+        <span class="ctrl-hint">Degrees swept per network round-trip — higher = faster rotation, coarser coverage</span>
       </div>
 
       <div class="ctrl-group">
@@ -247,21 +241,6 @@
       </div>
 
       <div class="ctrl-group">
-        <label class="ctrl-label"
-          >Steering Angle <span class="val">{{ steeringAngle | number: '1.0-0' }}°</span></label
-        >
-        <input
-          type="range"
-          class="styled-slider"
-          min="-60"
-          max="60"
-          step="1"
-          [value]="steeringAngle"
-          (input)="steeringAngle = +$any($event.target).value; onHardwareChange()"
-        />
-      </div>
-
-      <div class="ctrl-group">
         <label class="ctrl-label">Apodization</label>
         <div class="toggle-row" style="flex-wrap: wrap">
           <button
@@ -283,11 +262,123 @@
           type="range"
           class="styled-slider"
           min="0"
-          max="100"
+          max="1000"
           step="1"
           [value]="snr"
           (input)="snr = +$any($event.target).value; onHardwareChange()"
         />
+      </div>
+    </div>
+
+    <!-- ── Environment ─────────────────────────────────────────────── -->
+    <div class="ctrl-section">
+      <div class="section-label">Environment</div>
+
+      <div class="ctrl-group">
+        <label class="ctrl-label">
+          Noise Floor
+          <span class="val">{{ noiseFloorDbm | number: '1.0-0' }} dBm</span>
+        </label>
+        <input
+          type="range"
+          class="styled-slider"
+          min="-130"
+          max="-60"
+          step="1"
+          [value]="noiseFloorDbm"
+          (input)="noiseFloorDbm = +$any($event.target).value; onHardwareChange()"
+        />
+        <span class="ctrl-hint">Receiver thermal noise floor — lower = more sensitive</span>
+      </div>
+
+      <div class="ctrl-group">
+        <label class="ctrl-label">
+          Clutter Floor
+          <span class="val">{{ clutterFloorDbm | number: '1.0-0' }} dBm</span>
+        </label>
+        <input
+          type="range"
+          class="styled-slider"
+          min="-200"
+          max="-40"
+          step="5"
+          [value]="clutterFloorDbm"
+          (input)="clutterFloorDbm = +$any($event.target).value; onHardwareChange()"
+        />
+        <span class="ctrl-hint">Reference clutter power at 1 km — -200 = disabled</span>
+      </div>
+
+      <div class="ctrl-group">
+        <label class="ctrl-label">
+          Clutter Falloff
+          <span class="val">{{ clutterRangeExp | number: '1.0-0' }} dB/dec</span>
+        </label>
+        <input
+          type="range"
+          class="styled-slider"
+          min="-60"
+          max="-10"
+          step="5"
+          [value]="clutterRangeExp"
+          (input)="clutterRangeExp = +$any($event.target).value; onHardwareChange()"
+        />
+        <span class="ctrl-hint">How fast clutter drops with range (-20 = volume, -40 = surface)</span>
+      </div>
+    </div>
+
+    <!-- ── CFAR Detector ────────────────────────────────────────────── -->
+    <div class="ctrl-section">
+      <div class="section-label">CFAR Detector</div>
+
+      <div class="ctrl-group">
+        <label class="ctrl-label">
+          Guard Cells
+          <span class="val">{{ cfarGuardCells }}</span>
+        </label>
+        <input
+          type="range"
+          class="styled-slider"
+          min="1"
+          max="8"
+          step="1"
+          [value]="cfarGuardCells"
+          (input)="cfarGuardCells = +$any($event.target).value; onHardwareChange()"
+        />
+        <span class="ctrl-hint">Bins around CUT excluded from noise estimate — prevents self-masking</span>
+      </div>
+
+      <div class="ctrl-group">
+        <label class="ctrl-label">
+          Reference Cells
+          <span class="val">{{ cfarRefCells }}</span>
+        </label>
+        <input
+          type="range"
+          class="styled-slider"
+          min="4"
+          max="32"
+          step="2"
+          [value]="cfarRefCells"
+          (input)="cfarRefCells = +$any($event.target).value; onHardwareChange()"
+        />
+        <span class="ctrl-hint">More ref cells = stabler noise estimate but misses close targets</span>
+      </div>
+
+      <div class="ctrl-group">
+        <label class="ctrl-label">
+          P(FA)
+          <span class="val">{{ cfarPfa | number: '1.0-6' }}</span>
+        </label>
+        <input
+          type="range"
+          class="styled-slider"
+          min="1"
+          max="6"
+          step="1"
+          [value]="-Math.log10(cfarPfa)"
+          (input)="cfarPfa = Math.pow(10, -$any($event.target).value); onHardwareChange()"
+        />
+        <span class="ctrl-hint">False alarm rate: 10⁻¹ (sensitive) → 10⁻⁶ (strict)</span>
       </div>
     </div>
 
@@ -447,8 +538,7 @@
         </div>
         <div class="radar-footer">
           <span class="footer-note">
-            Bright = constructive · Dark = destructive · Updates every
-            {{ 10 / bfScanSpeedDegPerFrame | number: '1.0-0' }} frames
+            Bright = constructive · Dark = destructive · Updates every {{ (360 / steerSpeedDegPerBatch / 30) | number: '1.0-0' }} s est.
           </span>
         </div>
       </div>
