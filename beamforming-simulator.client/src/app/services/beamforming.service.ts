@@ -6,7 +6,7 @@
 
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, of, delay } from 'rxjs';
+import { Observable, of, delay, Subject } from 'rxjs';
 import {
   ProbeElementConfig,
   ArrayConfig,
@@ -102,6 +102,7 @@ export interface NetworkStateResult {
 // ── Environment switch ─────────────────────────────────────────────
 const USE_MOCK = false; // ← flip to false once backend is live
 const API_BASE = ''; // ← configure to match your backend
+const WS_BASE = 'ws://localhost:8000';
 
 @Injectable({ providedIn: 'root' })
 export class BeamformingService {
@@ -170,26 +171,79 @@ export class BeamformingService {
     return this.http.post<{ message: string }>(`${API_BASE}/radar/setup`, req);
   }
 
-  scanRadar(req: {
-    start_angle: number;
-    end_angle: number;
-    num_lines: number;
-    max_range_m: number;
-    num_range_bins: number;
-    targets: {
-      target_id: string;
-      x_m: number;
-      y_m: number;
-      velocity_m_s: number;
-      rcs_sqm: number;
-    }[];
-    radar_type: 'phased_array' | 'traditional';
-  }): Observable<{ sweep_data: { angle_deg: number; range_bins: number[] }[]; detections: any[] }> {
-    return this.http.post<{
-      sweep_data: { angle_deg: number; range_bins: number[] }[];
-      detections: any[];
-    }>(`${API_BASE}/radar/scan`, req);
+
+private bfSocket: WebSocket | null = null;
+private trdSocket: WebSocket | null = null;
+private bfScanResult$ = new Subject<{
+  sweep_data: any[];
+  detections: any[];
+  interference_image?: string;
+  interference_cols?: number;
+  interference_rows?: number;
+  beam_pattern?: number[];
+  angles_deg?: number[];
+  beam_angle?: number;
+  main_lobe_width?: number;
+  side_lobe_level?: number | null;
+}>();
+private trdScanResult$ = new Subject<{ sweep_data: any[]; detections: any[] }>();
+
+// ADD this method — call once on component init to open sockets:
+openScanSockets(): void {
+  this.closeScanSockets();
+
+  // Phased-array socket
+  this.bfSocket = new WebSocket(`${WS_BASE}/radar/scan`);
+  this.bfSocket.onmessage = (ev) => {
+    try { this.bfScanResult$.next(JSON.parse(ev.data)); } catch {}
+  };
+
+  // Traditional socket (second independent connection)
+  this.trdSocket = new WebSocket(`${WS_BASE}/radar/scan`);
+  this.trdSocket.onmessage = (ev) => {
+    try { this.trdScanResult$.next(JSON.parse(ev.data)); } catch {}
+  };
+}
+
+// ADD this method — call on component destroy:
+closeScanSockets(): void {
+  this.bfSocket?.close();
+  this.trdSocket?.close();
+  this.bfSocket = null;
+  this.trdSocket = null;
+}
+
+// these two methods — push a scan slice and receive the result stream:
+sendBfScanSlice(req: object): void {
+  if (this.bfSocket?.readyState === WebSocket.OPEN) {
+    this.bfSocket.send(JSON.stringify({ ...req, radar_type: 'phased_array' }));
   }
+}
+
+sendTrdScanSlice(req: object): void {
+  if (this.trdSocket?.readyState === WebSocket.OPEN) {
+    this.trdSocket.send(JSON.stringify({ ...req, radar_type: 'traditional' }));
+  }
+}
+
+get bfScanResults$(): Observable<{
+  sweep_data: any[];
+  detections: any[];
+  interference_image?: string;
+  interference_cols?: number;
+  interference_rows?: number;
+  beam_pattern?: number[];
+  angles_deg?: number[];
+  beam_angle?: number;
+  main_lobe_width?: number;
+  side_lobe_level?: number | null;
+}> {
+  return this.bfScanResult$.asObservable();
+}
+
+get trdScanResults$(): Observable<{ sweep_data: any[]; detections: any[] }> {
+  return this.trdScanResult$.asObservable();
+}
 
   /** Compute element delays for a target steering angle (backend). */
   computeSteeringDelays(

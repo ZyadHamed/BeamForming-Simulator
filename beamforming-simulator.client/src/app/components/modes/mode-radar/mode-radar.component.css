@@ -383,6 +383,8 @@
   flex: 1;
   position: relative;
   overflow: hidden;
+  min-height: 0;        /* ← allows flex shrink but keeps flex: 1 working */
+  height: 100%;         /* ← ensures the wrapper fills the card height */
 }
 .radar-canvas {
   display: block;
@@ -466,6 +468,7 @@
 .env-card {
   border-color: rgba(232, 168, 43, 0.4);
   height: 280px;
+  min-height: 280px;   /* ← prevents collapse to a thin line */
   flex-shrink: 0;
   flex-grow: 0;
 }

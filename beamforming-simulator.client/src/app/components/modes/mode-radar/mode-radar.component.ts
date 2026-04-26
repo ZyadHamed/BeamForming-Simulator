@@ -14,21 +14,6 @@ import { FormsModule } from '@angular/forms';
 
 import { BeamformingService } from '../../../services/beamforming.service';
 
-// ─── CHANGE 1 ─────────────────────────────────────────────────────────────────
-// STATUS: Existing value (10°) was correct; kept for both radars.
-// The phased-array dispatches a scan every CHUNK_DEG of electronic steering;
-// the traditional radar dispatches every CHUNK_DEG of physical rotation.
-// These are independent scan triggers — no shared state between modes.
-// ─────────────────────────────────────────────────────────────────────────────
-const CHUNK_DEG = 10;
-
-// ─── CHANGE 2 ─────────────────────────────────────────────────────────────────
-// STATUS: REMOVE — PHOSPHOR_FADE_ALPHA / TRD_PHOSPHOR_FADE_ALPHA created
-// "fading animation" / "beeping persistence" effects explicitly banned by spec.
-// REPLACE WITH: no per-frame fade. The offscreen canvas is only cleared when a
-// full 360° sweep completes (traditional) or a full scan cycle restarts (PA).
-// This makes returns data-driven: a bin is visible iff the backend returned it.
-// ─────────────────────────────────────────────────────────────────────────────
 
 interface DetectionData {
   snr_db: number;
@@ -38,15 +23,6 @@ interface DetectionData {
   angle_deg: number;
 }
 
-// ─── CHANGE 3 ─────────────────────────────────────────────────────────────────
-// STATUS: BUGGY — RadarTarget had stray fields (`detectedAt`, `trdDetectedAt`)
-// added inline in initEnvCanvas (line 374-375) that are not on the interface,
-// causing silent TS errors and phantom "detected" states.
-// REPLACE WITH: clean interface; detection state lives only in lastDetection /
-// trdLastDetection (typed DetectionData | null).
-// Also ADDED: `rcs` is now the canonical resize handle — maps directly to
-// rcs_sqm in the DTO, satisfying "Resize targets dynamically".
-// ─────────────────────────────────────────────────────────────────────────────
 interface RadarTarget {
   id: string;
   angle: number; // bearing degrees, 0 = North, clockwise
@@ -74,11 +50,6 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
   // ── Public state ─────────────────────────────────────────────────────────
   targets: RadarTarget[] = [];
 
-  // ─── CHANGE 4 ─────────────────────────────────────────────────────────────
-  // STATUS: BUGGY — single `scanSpeed` drove both radars identically.
-  // Traditional radar must rotate at a *fixed physical rate*; only the PA
-  // scan speed should be user-adjustable (electronic steering frequency).
-  // REPLACE WITH: separate controls.
   bfScanSpeedDegPerFrame: number = 1.2; // PA electronic steering speed
   readonly TRD_ROT_DEG_PER_FRAME = 0.5; // traditional — fixed mechanical rate
 
@@ -108,31 +79,13 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
   private beamPattern: number[] = [];
   private anglesDeg: number[] = [];
 
-  // ─── CHANGE 5 ─────────────────────────────────────────────────────────────
-  // STATUS: CORRECT — separate scan-angle/busy/accumulator for each mode.
-  // Confirmed: bfScanAngle drives electronic steering; trdAngle drives
-  // mechanical rotation. No shared variable between modes. Kept as-is.
-  // ─────────────────────────────────────────────────────────────────────────
   private bfScanAngle: number = 0;
-  private bfBusy: boolean = false;
-  private bfLastAngle: number = 0;
-  private bfAngleSince: number = 0;
   private bfScanDir: number = 1;
 
   private trdAngle: number = 0;
-  private trdBusy: boolean = false;
-  private trdLastAngle: number = 0;
-  private trdAngleSince: number = 0;
 
   readonly maxRangeKm = 100;
 
-  // ─── CHANGE 6 ─────────────────────────────────────────────────────────────
-  // STATUS: BUGGY — offscreen phosphor canvases were used to implement fading
-  // glow animations (PHOSPHOR_FADE_ALPHA). Spec mandates data-driven rendering
-  // only — no fade, no persistence animations.
-  // REPLACE WITH: single offscreen "paint" canvas per radar. It is cleared once
-  // per full sweep cycle, then freshly repainted from backend data.
-  // ─────────────────────────────────────────────────────────────────────────
   private bfPaint!: HTMLCanvasElement;
   private bfPaintCtx!: CanvasRenderingContext2D;
   private trdPaint!: HTMLCanvasElement;
@@ -182,11 +135,6 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
     return this.radarInfo?.hpbw_deg ?? this.physicalBeamWidthDeg;
   }
 
-  // ─── CHANGE 7 ─────────────────────────────────────────────────────────────
-  // STATUS: BUGGY — isDetected() and isTrdDetected() were CALLED at lines
-  // 431, 150 (HTML) but NEVER DEFINED anywhere in the file.
-  // REPLACE WITH: proper methods that check lastDetection / trdLastDetection.
-  // ─────────────────────────────────────────────────────────────────────────
   isDetected(tgt: RadarTarget): boolean {
     return tgt.lastDetection !== null;
   }
@@ -253,6 +201,58 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
       },
       error: (e) => console.warn('Radar setup failed:', e),
     });
+
+    this.beamSvc.openScanSockets();
+
+    this.beamSvc.bfScanResults$.subscribe((res) => {
+      if (res?.sweep_data) this.paintBfCanvas(res.sweep_data);
+      if (res?.detections?.length) {
+        this.targets.forEach((tgt) => {
+          const d = res.detections.find((x: any) => x.target_id === tgt.id);
+          if (d) tgt.lastDetection = {
+            snr_db: d.snr_db, doppler_m_s: d.doppler_m_s,
+            estimated_rcs: d.estimated_rcs, range_m: d.range_m, angle_deg: d.angle_deg,
+          };
+        });
+        this.zone.run(() => this.cdr.markForCheck());
+      }
+      
+      if (res.interference_image) {
+        this.interferenceImage = res.interference_image;
+        this.interferenceSize  = res.interference_cols
+          ? { cols: res.interference_cols, rows: res.interference_rows ?? 0 }
+          : this.interferenceSize;
+        this.cdr.markForCheck();
+      }
+      
+      if (res.beam_pattern) {
+        this.beamPattern = res.beam_pattern;
+        this.anglesDeg   = res.angles_deg ?? this.anglesDeg;
+        if (res.beam_angle != null || res.main_lobe_width != null || res.side_lobe_level != null) {
+          this.radarInfo = {
+            ...this.radarInfo,
+            beam_angle     : res.beam_angle      ?? this.radarInfo?.beam_angle,
+            main_lobe_width: res.main_lobe_width ?? this.radarInfo?.main_lobe_width,
+            side_lobe_level: res.side_lobe_level ?? this.radarInfo?.side_lobe_level,
+          };
+        }
+        this.drawPatternCanvas();
+      }
+    });
+
+    this.beamSvc.trdScanResults$.subscribe((res) => {
+      if (res?.sweep_data) this.paintTrdCanvas(res.sweep_data);
+      if (res?.detections?.length) {
+        this.targets.forEach((tgt) => {
+          const d = res.detections.find((x: any) => x.target_id === tgt.id);
+          if (d) tgt.trdLastDetection = {
+            snr_db: d.snr_db, doppler_m_s: d.doppler_m_s,
+            estimated_rcs: d.estimated_rcs, range_m: d.range_m, angle_deg: d.angle_deg,
+          };
+        });
+        this.zone.run(() => this.cdr.markForCheck());
+      }
+    });
   }
 
   ngAfterViewInit(): void {
@@ -276,6 +276,7 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   ngOnDestroy(): void {
     cancelAnimationFrame(this.animId);
+    this.beamSvc.closeScanSockets();
   }
 
   trackById(_: number, tgt: RadarTarget): string {
@@ -294,12 +295,7 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
           : null;
         this.anglesDeg = res.angles_deg ?? [];
         setTimeout(() => this.drawPatternCanvas(), 0);
-        // ─── CHANGE 8 ───────────────────────────────────────────────────────
-        // STATUS: BUGGY — on re-setup the old code referenced `this.ppiCtx`
-        // and `this.ppiCanvas` (line 246) which were NEVER defined, causing a
-        // silent runtime crash every time hardware params changed.
-        // REPLACE WITH: clear only the BF paint canvas (correct scope).
-        // ────────────────────────────────────────────────────────────────────
+
         if (this.bfPaintCtx)
           this.bfPaintCtx.clearRect(0, 0, this.bfPaint.width, this.bfPaint.height);
         this.cdr.markForCheck();
@@ -308,11 +304,6 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
-  // ─── CHANGE 9 ─────────────────────────────────────────────────────────────
-  // STATUS: BUGGY — addTarget() (line 253) did not set `trdLastDetection`,
-  // breaking the trdLiveDetectedCount getter with undefined reads.
-  // Also: hard cap of 5 targets removed (spec requires N targets).
-  // ─────────────────────────────────────────────────────────────────────────
   addTarget(): void {
     const idx = this.targets.length;
     this.targets.push({
@@ -360,12 +351,6 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
     };
   }
 
-  // ─── CHANGE 10 ────────────────────────────────────────────────────────────
-  // STATUS: BUGGY — toTargetDTO sent `num_range_bins` was not configurable.
-  // More critically the target cap of 5 in `radar_scan` (backend) is removed
-  // on the frontend by simply not limiting `this.targets`. The backend cap
-  // must also be lifted (see RadarScenario status report).
-  // ─────────────────────────────────────────────────────────────────────────
   private toTargetDTO(t: RadarTarget): any {
     const range_m = t.range * this.maxRangeKm * 1000;
     const angle_rad = (t.angle * Math.PI) / 180;
@@ -476,11 +461,6 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
         return;
       }
 
-      // ─── CHANGE 11 ──────────────────────────────────────────────────────
-      // STATUS: NOT APPLIED — spec requires "Resize targets dynamically".
-      // REPLACE WITH: horizontal mouse drag while middle-button held → scales RCS.
-      // RCS range 0.5–100 m². Visual radius proportional to sqrt(rcs).
-      // ────────────────────────────────────────────────────────────────────
       if (this.envResizeTarget) {
         const delta = e.offsetX - this.envResizeStartX;
         const newRcs = Math.max(0.5, Math.min(100, this.envResizeStartRcs + delta * 0.3));
@@ -511,22 +491,11 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
     return [cx + dist * Math.cos(rad), cy + dist * Math.sin(rad)];
   }
 
-  // ─── CHANGE 12 ────────────────────────────────────────────────────────────
-  // STATUS: NOT APPLIED — target dots were a fixed 3.5 px radius regardless of
-  // RCS. Spec: "Changes in target size must immediately reflect in radar data."
-  // Visual radius gives the user direct feedback that RCS has changed.
-  // ─────────────────────────────────────────────────────────────────────────
   private targetVisualRadius(tgt: RadarTarget): number {
     // radius = 4..18 px over rcs = 0.5..100 m²
     return 4 + Math.sqrt(Math.max(tgt.rcs, 0.5)) * 1.4;
   }
 
-  // ─── CHANGE 13 ────────────────────────────────────────────────────────────
-  // STATUS: BUGGY — drawEnvCanvas() was defined but NEVER CALLED from the
-  // animation loop (confirmed: grep found zero call-sites).
-  // REPLACE WITH: called every frame inside startAnimation() loop.
-  // Also: spec requires a "clear Cartesian grid" on the environment canvas.
-  // ─────────────────────────────────────────────────────────────────────────
   private drawEnvCanvas(): void {
     const canvas = this.envCanvasRef?.nativeElement;
     if (!canvas) return;
@@ -686,15 +655,28 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
         this.advanceBfScan();
         this.advanceTrdScan();
 
-        if (this.radarReady && !this.bfBusy && this.bfAngleSince >= CHUNK_DEG) this.requestBfScan();
-        if (this.radarReady && !this.trdBusy && this.trdAngleSince >= CHUNK_DEG)
-          this.requestTrdScan();
+        if (this.radarReady) {
+          this.beamSvc.sendBfScanSlice({
+            start_angle   : this.bfScanAngle,
+            end_angle     : this.bfScanAngle + this.bfScanSpeedDegPerFrame,
+            num_lines     : 1,
+            max_range_m   : this.scanRange * this.maxRangeKm * 1000,
+            num_range_bins: 128,
+            targets       : this.targets.map((t) => this.toTargetDTO(t)),
+            radar_type    : 'phased_array',
+          });
 
-        // ─── CHANGE 14 ──────────────────────────────────────────────────────
-        // STATUS: BUGGY — drawEnvCanvas() was never called from the loop.
-        // REPLACE WITH: include it on every frame so the environment view
-        // stays live (targets move, RCS changes are reflected immediately).
-        // ────────────────────────────────────────────────────────────────────
+          this.beamSvc.sendTrdScanSlice({
+            start_angle   : this.trdAngle,
+            end_angle     : this.trdAngle + this.TRD_ROT_DEG_PER_FRAME,
+            num_lines     : 1,
+            max_range_m   : this.scanRange * this.maxRangeKm * 1000,
+            num_range_bins: 128,
+            targets       : this.targets.map((t) => this.toTargetDTO(t)),
+            radar_type    : 'traditional',
+          });
+        }
+
         this.drawEnvCanvas();
         this.drawBeamformingCanvas();
         this.drawTraditionalCanvas();
@@ -705,11 +687,6 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
-  // ─── CHANGE 15 ────────────────────────────────────────────────────────────
-  // STATUS: CORRECT — bfScanAngle sweeps electronically (no physical rotation
-  // variable used), mode toggles between full-360 and sector bounce.
-  // CHANGE: `scanSpeed` renamed to `bfScanSpeedDegPerFrame` for clarity.
-  // ─────────────────────────────────────────────────────────────────────────
   private advanceBfScan(): void {
     if (this.sweepMode === 'full') {
       this.bfScanAngle = (this.bfScanAngle + this.bfScanSpeedDegPerFrame) % 360;
@@ -726,182 +703,29 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
       }
       this.bfFullRotDeg += this.bfScanSpeedDegPerFrame;
     }
-    this.bfAngleSince += this.bfScanSpeedDegPerFrame;
+
+    if (this.bfFullRotDeg >= 360) {
+    this.bfFullRotDeg = 0;
+    this.bfPaintCtx.clearRect(0, 0, this.bfPaint.width, this.bfPaint.height);
+    this.targets.forEach((t) => (t.lastDetection = null));
+    }
   }
 
-  // ─── CHANGE 16 ────────────────────────────────────────────────────────────
-  // STATUS: CORRECT — trdAngle is independent of bfScanAngle, representing
-  // physical antenna rotation. Rate is a fixed constant (mechanical spec).
-  // No shared state with the PA sweep. Kept; add full-rotation tracking.
-  // ─────────────────────────────────────────────────────────────────────────
   private advanceTrdScan(): void {
     this.trdAngle = (this.trdAngle + this.TRD_ROT_DEG_PER_FRAME) % 360;
-    this.trdAngleSince += this.TRD_ROT_DEG_PER_FRAME;
     this.trdFullRotDeg += this.TRD_ROT_DEG_PER_FRAME;
-  }
 
-  // ─── CHANGE 17 ────────────────────────────────────────────────────────────
-  // STATUS: CORRECT logic; BUGGY side-effect — after a scan response the code
-  // called setupRadar() for every chunk, generating N+1 HTTP requests per
-  // animation cycle and clobbering the interference map with a stale angle.
-  // REPLACE WITH: re-setup only when the steering angle has moved by ≥ CHUNK_DEG
-  // since the last setup call. Also clears paint canvas every full 360° so
-  // stale returns do not accumulate (spec: "data-driven rendering").
-  // ─────────────────────────────────────────────────────────────────────────
-  private bfLastSetupAngle: number = -999;
-
-  private requestBfScan(): void {
-    const diff = this.bfAngleSince;
-    if (diff < 1) return;
-
-    this.bfBusy = true;
-    this.bfAngleSince = 0;
-
-    const startAngle = this.bfLastAngle;
-    const numLines = Math.max(2, Math.min(36, Math.round(diff)));
-
-    // Clear paint canvas every full rotation cycle (data-driven, no ghost returns)
-    if (this.bfFullRotDeg >= 360) {
-      this.bfFullRotDeg = 0;
-      this.bfPaintCtx.clearRect(0, 0, this.bfPaint.width, this.bfPaint.height);
-      // Expire detections on full sweep
-      this.targets.forEach((t) => (t.lastDetection = null));
-    }
-
-    this.beamSvc
-      .scanRadar({
-        start_angle: startAngle,
-        end_angle: startAngle + diff,
-        num_lines: numLines,
-        max_range_m: this.scanRange * this.maxRangeKm * 1000,
-        targets: this.targets.map((t) => this.toTargetDTO(t)),
-        radar_type: 'phased_array',
-        num_range_bins: 128,
-      })
-      .subscribe({
-        next: (res: any) => {
-          this.bfBusy = false;
-          this.bfLastAngle = this.bfScanAngle % 360;
-
-          if (res?.sweep_data) this.paintBfCanvas(res.sweep_data);
-
-          if (res?.detections?.length) {
-            this.targets.forEach((tgt) => {
-              const d = res.detections.find((x: any) => x.target_id === tgt.id);
-              if (d)
-                tgt.lastDetection = {
-                  snr_db: d.snr_db,
-                  doppler_m_s: d.doppler_m_s,
-                  estimated_rcs: d.estimated_rcs,
-                  range_m: d.range_m,
-                  angle_deg: d.angle_deg,
-                };
-            });
-            this.zone.run(() => this.cdr.markForCheck());
-          }
-
-          // Re-setup only when steering angle has shifted enough for a meaningful
-          // update to the interference map / beam profile.
-          const angleDelta = Math.abs(this.bfScanAngle - this.bfLastSetupAngle);
-          if (angleDelta >= CHUNK_DEG) {
-            this.bfLastSetupAngle = this.bfScanAngle;
-            this.beamSvc.setupRadar(this.buildRadarSetupRequest()).subscribe({
-              next: (info: any) => {
-                this.radarInfo = info;
-                this.beamPattern = info.beam_pattern ?? [];
-                this.anglesDeg = info.angles_deg ?? [];
-                this.interferenceImage = info.interference_image ?? null;
-                this.interferenceSize = info.interference_cols
-                  ? { cols: info.interference_cols, rows: info.interference_rows }
-                  : null;
-                setTimeout(() => this.drawPatternCanvas(), 0);
-                this.zone.run(() => this.cdr.markForCheck());
-              },
-            });
-          }
-        },
-        error: () => {
-          this.bfBusy = false;
-        },
-      });
-  }
-
-  // ─── CHANGE 18 ────────────────────────────────────────────────────────────
-  // STATUS: CORRECT — traditional scan uses radar_type='traditional', driving
-  // generate_traditional_scan() in the backend (sinc² beam, no steering delays,
-  // no beamforming). No interference-map re-setup called here — the traditional
-  // radar has no electronic steering and no beamforming to update.
-  // ADDED: same data-driven clear-on-full-rotation logic as the PA.
-  // ─────────────────────────────────────────────────────────────────────────
-  private requestTrdScan(): void {
-    const diff = this.trdAngleSince;
-    if (diff < 1) return;
-
-    this.trdBusy = true;
-    this.trdAngleSince = 0;
-
-    const startAngle = this.trdLastAngle;
-    const numLines = Math.max(2, Math.min(36, Math.round(diff)));
-
-    // Clear paint canvas once per full mechanical rotation
     if (this.trdFullRotDeg >= 360) {
-      this.trdFullRotDeg = 0;
-      this.trdPaintCtx.clearRect(0, 0, this.trdPaint.width, this.trdPaint.height);
-      this.targets.forEach((t) => (t.trdLastDetection = null));
+    this.trdFullRotDeg = 0;
+    this.trdPaintCtx.clearRect(0, 0, this.trdPaint.width, this.trdPaint.height);
+    this.targets.forEach((t) => (t.trdLastDetection = null));
     }
-
-    this.beamSvc
-      .scanRadar({
-        start_angle: startAngle,
-        end_angle: startAngle + diff,
-        num_lines: numLines,
-        max_range_m: this.scanRange * this.maxRangeKm * 1000,
-        targets: this.targets.map((t) => this.toTargetDTO(t)),
-        radar_type: 'traditional',
-        num_range_bins: 128,
-      })
-      .subscribe({
-        next: (res: any) => {
-          this.trdBusy = false;
-          this.trdLastAngle = this.trdAngle % 360;
-
-          if (res?.sweep_data) this.paintTrdCanvas(res.sweep_data);
-
-          if (res?.detections?.length) {
-            this.targets.forEach((tgt) => {
-              const d = res.detections.find((x: any) => x.target_id === tgt.id);
-              if (d)
-                tgt.trdLastDetection = {
-                  snr_db: d.snr_db,
-                  doppler_m_s: d.doppler_m_s,
-                  estimated_rcs: d.estimated_rcs,
-                  range_m: d.range_m,
-                  angle_deg: d.angle_deg,
-                };
-            });
-            this.zone.run(() => this.cdr.markForCheck());
-          }
-        },
-        error: () => {
-          this.trdBusy = false;
-        },
-      });
   }
-
+ 
   // ─────────────────────────────────────────────────────────────────────────
   // RENDERING
   // ─────────────────────────────────────────────────────────────────────────
 
-  // ─── CHANGE 19 ────────────────────────────────────────────────────────────
-  // STATUS: BUGGY — paintBfPhosphor() drew returns onto a "phosphor" canvas
-  // that was then faded every frame, creating the banned glow/persistence
-  // animation. Also: origin was hard-coded to bottom-center (fan geometry)
-  // which is only appropriate for a short-range sector display; for a 360°
-  // PPI the origin must be center.
-  // REPLACE WITH: paintBfCanvas() — writes directly to the clear-on-cycle
-  // paint canvas; full 360° PPI geometry (origin = center).
-  // Color scale: dim-blue (0) → cyan (0.5) → white (1.0) on SNR intensity.
-  // ─────────────────────────────────────────────────────────────────────────
   private paintBfCanvas(sweep_data: any[]): void {
     if (!this.bfPaintCtx) return;
     const W = this.bfPaint.width;
@@ -941,11 +765,6 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
-  // ─── CHANGE 20 ────────────────────────────────────────────────────────────
-  // STATUS: BUGGY — paintTrdPhosphor() same fade-animation issue as PA.
-  // REPLACE WITH: paintTrdCanvas() — writes to clear-on-cycle paint canvas.
-  // Traditional PPI color scale: dark-green (0) → yellow-green (0.5) → white (1).
-  // ─────────────────────────────────────────────────────────────────────────
   private paintTrdCanvas(sweep_data: any[]): void {
     if (!this.trdPaintCtx) return;
     const W = this.trdPaint.width;
@@ -984,14 +803,6 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
-  // ─── CHANGE 21 ────────────────────────────────────────────────────────────
-  // STATUS: BUGGY — drawBeamformingCanvas() origin was bottom-center (cy=H-12)
-  // for a "fan" geometry. This is appropriate for a short-range sector display
-  // but conflicts with 360° full-sweep PPI mode.
-  // REPLACE WITH: standard centre-origin PPI geometry for both modes.
-  // The beam cursor line is kept (data-derived from bfScanAngle) but the
-  // "swoosh fan" radial from bottom is removed (banned animation artifact).
-  // ─────────────────────────────────────────────────────────────────────────
   private drawBeamformingCanvas(): void {
     const canvas = this.bfCanvasRef?.nativeElement;
     if (!canvas) return;
@@ -1072,14 +883,6 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.drawTrdGrid(ctx, cx, cy, R);
     ctx.drawImage(this.trdPaint, 0, 0);
 
-    // ─── CHANGE 22 ──────────────────────────────────────────────────────────
-    // STATUS: BUGGY — sweep cursor angle formula used `trdAngle - 90` (correct
-    // for North-up clockwise), but trdAngle was accumulated modulo 360 while
-    // being added to `trdLastAngle` without modulo normalisation in the scan
-    // request, causing the sweep and scan window to desync after ~1 revolution.
-    // REPLACE WITH: ensure trdAngle is always normalized to [0, 360) before
-    // the cursor draw (already done in advanceTrdScan via `% 360`).
-    // ────────────────────────────────────────────────────────────────────────
     const angleRad = ((this.trdAngle - 90) * Math.PI) / 180;
     ctx.beginPath();
     ctx.moveTo(cx, cy);
@@ -1089,12 +892,6 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
     ctx.stroke();
   }
 
-  // ─── CHANGE 23 ────────────────────────────────────────────────────────────
-  // STATUS: BUGGY — drawBfGrid() used bottom-center origin (cy = H-12) for
-  // range arc start, and hard-coded "upper hemisphere only" arcs. This was
-  // inconsistent with the full 360° PPI paint canvas (center origin).
-  // REPLACE WITH: full-circle PPI grid centered at (cx, cy).
-  // ─────────────────────────────────────────────────────────────────────────
   private drawBfGrid(ctx: CanvasRenderingContext2D, cx: number, cy: number, R: number): void {
     ctx.save();
     ctx.lineWidth = 1;
@@ -1169,11 +966,6 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
     ctx.restore();
   }
 
-  // ─── CHANGE 24 ────────────────────────────────────────────────────────────
-  // STATUS: CORRECT — polar beam-pattern plot logic was sound. Minor fix:
-  // steering marker now reads `bfScanAngle` (live) not a stale `steeringAngle`
-  // UI variable, ensuring the pattern plot reflects the current scan position.
-  // ─────────────────────────────────────────────────────────────────────────
   private drawPatternCanvas(): void {
     const canvasEl = this.patternCanvasRef?.nativeElement;
     if (!canvasEl || !this.beamPattern.length) return;
