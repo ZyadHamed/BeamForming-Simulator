@@ -224,17 +224,27 @@ private trdScanResult$ = new Subject<{ sweep_data: any[]; detections: any[] }>()
 openScanSockets(): void {
   this.closeScanSockets();
 
-  // Phased-array socket
   this.bfSocket = new WebSocket(`${WS_BASE}/radar/scan`);
   this.bfSocket.onmessage = (ev) => {
     try { this.bfScanResult$.next(JSON.parse(ev.data)); } catch {}
   };
+
+  this.bfSocket.onopen = () => this.bfSocket?.send(JSON.stringify({
+    start_angle: 0, end_angle: 360, num_lines: 1,
+    max_range_m: 150000, num_range_bins: 128,
+    targets: [], radar_type: 'phased_array',
+  }));
 
   // Traditional socket (second independent connection)
   this.trdSocket = new WebSocket(`${WS_BASE}/radar/scan`);
   this.trdSocket.onmessage = (ev) => {
     try { this.trdScanResult$.next(JSON.parse(ev.data)); } catch {}
   };
+  this.trdSocket.onopen = () => this.trdSocket?.send(JSON.stringify({
+    start_angle: 0, end_angle: 360, num_lines: 1,
+    max_range_m: 150000, num_range_bins: 128,
+    targets: [], radar_type: 'traditional',
+  }));
 }
 
 // ADD this method — call on component destroy:
@@ -255,6 +265,18 @@ sendBfScanSlice(req: object): void {
 sendTrdScanSlice(req: object): void {
   if (this.trdSocket?.readyState === WebSocket.OPEN) {
     this.trdSocket.send(JSON.stringify({ ...req, radar_type: 'traditional' }));
+  }
+}
+
+sendBfReady(): void {
+  if (this.bfSocket?.readyState === WebSocket.OPEN) {
+    this.bfSocket.send('READY');
+  }
+}
+
+sendTrdReady(): void {
+  if (this.trdSocket?.readyState === WebSocket.OPEN) {
+    this.trdSocket.send('READY');
   }
 }
 
