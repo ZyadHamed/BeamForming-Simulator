@@ -65,6 +65,17 @@ export interface RadarSetupRequest {
   noise_floor_dbm: number;
   wave_speed: number;
   elements: RadarElementInput[];
+  // Waveform
+  pt_dbm: number;
+  prf_hz: number;
+  pulse_width_us: number;
+  // Environment
+  clutter_floor_dbm: number;
+  clutter_range_exp: number;
+  // Detector
+  cfar_guard_cells: number;
+  cfar_ref_cells: number;
+  cfar_pfa: number;
 }
 // ── 5G Interfaces ──────────────────────────────────────────────────
 export interface Tower5GRequest {
@@ -136,6 +147,7 @@ export interface TowerConfigUpdateRequest {
 const USE_MOCK = false; // ← flip to false once backend is live
 const API_BASE = 'http://localhost:8000'; // ← configure to match your backend
 const WS_BASE = 'WS://localhost:8000';
+
 @Injectable({ providedIn: 'root' })
 export class BeamformingService {
   constructor(private http: HttpClient) {}
@@ -229,22 +241,11 @@ openScanSockets(): void {
     try { this.bfScanResult$.next(JSON.parse(ev.data)); } catch {}
   };
 
-  this.bfSocket.onopen = () => this.bfSocket?.send(JSON.stringify({
-    start_angle: 0, end_angle: 360, num_lines: 1,
-    max_range_m: 150000, num_range_bins: 128,
-    targets: [], radar_type: 'phased_array',
-  }));
-
   // Traditional socket (second independent connection)
   this.trdSocket = new WebSocket(`${WS_BASE}/radar/scan`);
   this.trdSocket.onmessage = (ev) => {
     try { this.trdScanResult$.next(JSON.parse(ev.data)); } catch {}
   };
-  this.trdSocket.onopen = () => this.trdSocket?.send(JSON.stringify({
-    start_angle: 0, end_angle: 360, num_lines: 1,
-    max_range_m: 150000, num_range_bins: 128,
-    targets: [], radar_type: 'traditional',
-  }));
 }
 
 // ADD this method — call on component destroy:

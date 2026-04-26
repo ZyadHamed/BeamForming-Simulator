@@ -13,7 +13,6 @@ class RadarTarget:
     target_id:    str
     x_m:          float
     y_m:          float
-    velocity_m_s: float = 0.0
     rcs_sqm:      float = 1.0
 
     @property

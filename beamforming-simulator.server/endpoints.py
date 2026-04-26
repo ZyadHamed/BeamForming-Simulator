@@ -775,7 +775,7 @@ def _compute_sector_pattern(sector, local_angles_deg: list):
 
 # --- Radar State ---
 active_radar: Optional[RadarScenario] = None
-INTERFERENCE_EVERY_N_FRAMES = 30  # recompute ~every N scan slices
+INTERFERENCE_UPDATE_INTERVAL_DEG = 15.0
 _radar_lock = asyncio.Lock()  
 
 # --- Radar DTOs ---
@@ -811,7 +811,6 @@ class RadarTargetDTO(BaseModel):
     target_id  : str
     x_m        : float
     y_m        : float
-    velocity_m_s: float = 0.0
     rcs_sqm    : float
 
 class RadarScanRequest(BaseModel):
@@ -1049,12 +1048,9 @@ async def ws_radar_scan(websocket: WebSocket):
                         target_id    = t.target_id,
                         x_m          = t.x_m,
                         y_m          = t.y_m,
-                        velocity_m_s = t.velocity_m_s,
                         rcs_sqm      = t.rcs_sqm,
                     ) for t in req.targets
                 ]
-
-            async with _radar_lock:
                 if req.radar_type == 'traditional':
                     result = active_radar.generate_traditional_scan(
                         start_angle    = req.start_angle,
@@ -1080,7 +1076,9 @@ async def ws_radar_scan(websocket: WebSocket):
             }
 
             # ── Interference field (every N frames, non-blocking) ──────────
-            if frame_counter % INTERFERENCE_EVERY_N_FRAMES == 0 and req.radar_type == 'phased_array':
+            swept_deg = req.end_angle - req.start_angle
+            interval  = max(1.0, INTERFERENCE_UPDATE_INTERVAL_DEG)
+            if swept_deg > 0 and (req.end_angle % interval) < swept_deg and req.radar_type == 'phased_array':
                 loop = asyncio.get_event_loop()
                 interference_result = await loop.run_in_executor(
                     None, _compute_interference_only, active_radar
