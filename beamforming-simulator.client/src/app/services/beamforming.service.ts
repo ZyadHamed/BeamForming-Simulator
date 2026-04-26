@@ -135,7 +135,7 @@ export interface TowerConfigUpdateRequest {
 // ── Environment switch ─────────────────────────────────────────────
 const USE_MOCK = false; // ← flip to false once backend is live
 const API_BASE = 'http://localhost:8000'; // ← configure to match your backend
-
+const WS_BASE = 'WS://localhost:8000';
 @Injectable({ providedIn: 'root' })
 export class BeamformingService {
   constructor(private http: HttpClient) {}
