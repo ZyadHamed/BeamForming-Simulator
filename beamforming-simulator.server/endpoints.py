@@ -161,6 +161,8 @@ def update_users_and_evaluate(req: UserUpdateRequest):
 
 # --- Radar State ---
 active_radar: Optional[RadarScenario] = None
+_frame_counter: int = 0
+INTERFERENCE_EVERY_N_FRAMES = 60  # recompute ~every 30 scan slices
 _radar_lock = asyncio.Lock()  
 
 # --- Radar DTOs ---
@@ -334,7 +336,7 @@ def radar_setup(req: RadarSetupRequest):
     
     # Compute the antenna's beam pattern so the UI can graph the lobes!
     config.calculate_steering_delays()
-    bf_result = config.compute_beamforming()
+    bf_result = active_radar.compute_beamforming_4face()
     
     n_el      = len([e for e in active_radar.config.elements if e.enabled])
     aperture  = (n_el - 1) * active_radar.config.element_spacing
@@ -420,33 +422,37 @@ async def ws_radar_scan(websocket: WebSocket):
                         num_range_bins = req.num_range_bins,
                     )
 
-            n_el     = len([e for e in active_radar.config.elements if e.enabled])
-            aperture = (n_el - 1) * active_radar.config.element_spacing
-            width_mm = max(aperture * 4, 100.0)
-            depth_mm = width_mm
-            res_mm   = width_mm / 250.0
+            global _frame_counter
+            _frame_counter += 1
 
-            interference = active_radar.compute_interference_field(
-                width_mm      = width_mm,
-                depth_mm      = depth_mm,
-                resolution_mm = res_mm,
-            )
+            payload: dict = {
+                "sweep_data": result.sweep_data,
+                "detections": [vars(d) for d in result.detections],
+            }
 
-            bf_result = active_radar.config.compute_beamforming()
+            if _frame_counter % INTERFERENCE_EVERY_N_FRAMES == 0:
+                n_el     = len([e for e in active_radar.config.elements if e.enabled])
+                aperture = (n_el - 1) * active_radar.config.element_spacing
+                width_mm = max(aperture * 4, 100.0)
+                res_mm   = width_mm / 250.0
 
-            await websocket.send_text(json.dumps({
-                "sweep_data"        : result.sweep_data,
-                "detections"        : [vars(d) for d in result.detections],
-                "interference_image": interference.image_base64,
-                "interference_cols" : interference.cols,
-                "interference_rows" : interference.rows,
-                "beam_pattern"      : bf_result.beam_pattern_db,
-                "angles_deg"        : bf_result.angles_deg,
-                "beam_angle"        : bf_result.beam_angle,
-                "main_lobe_width"   : bf_result.main_lobe_width,
-                "side_lobe_level"   : bf_result.side_lobe_level,
-            }))
+                interference = active_radar.compute_interference_field(
+                    width_mm      = width_mm,
+                    depth_mm      = width_mm,
+                    resolution_mm = res_mm,
+                )
+                bf_result = active_radar.compute_beamforming_4face()
 
+                payload["interference_image"] = interference.image_base64
+                payload["interference_cols"]  = interference.cols
+                payload["interference_rows"]  = interference.rows
+                payload["beam_pattern"]       = bf_result.beam_pattern_db
+                payload["angles_deg"]         = bf_result.angles_deg
+                payload["beam_angle"]         = bf_result.beam_angle
+                payload["main_lobe_width"]    = bf_result.main_lobe_width
+                payload["side_lobe_level"]    = bf_result.side_lobe_level
+
+            await websocket.send_text(json.dumps(payload))
     except WebSocketDisconnect:
         pass
 # # --- Pydantic Schemas for API I/O ---

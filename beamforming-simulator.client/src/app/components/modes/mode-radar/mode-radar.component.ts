@@ -664,6 +664,7 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
             num_range_bins: 128,
             targets       : this.targets.map((t) => this.toTargetDTO(t)),
             radar_type    : 'phased_array',
+            // backend will replicate this slice across all 4 faces internally
           });
 
           this.beamSvc.sendTrdScanSlice({
@@ -688,21 +689,8 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   private advanceBfScan(): void {
-    if (this.sweepMode === 'full') {
-      this.bfScanAngle = (this.bfScanAngle + this.bfScanSpeedDegPerFrame) % 360;
-      this.bfFullRotDeg += this.bfScanSpeedDegPerFrame;
-    } else {
-      this.bfScanAngle += this.bfScanSpeedDegPerFrame * this.bfScanDir;
-      if (this.bfScanAngle >= this.sectorMax) {
-        this.bfScanAngle = this.sectorMax;
-        this.bfScanDir = -1;
-      }
-      if (this.bfScanAngle <= this.sectorMin) {
-        this.bfScanAngle = this.sectorMin;
-        this.bfScanDir = 1;
-      }
-      this.bfFullRotDeg += this.bfScanSpeedDegPerFrame;
-    }
+    this.bfScanAngle = (this.bfScanAngle + this.bfScanSpeedDegPerFrame) % 360;
+    this.bfFullRotDeg += this.bfScanSpeedDegPerFrame;
 
     if (this.bfFullRotDeg >= 360) {
     this.bfFullRotDeg = 0;
@@ -977,7 +965,7 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
     ctx.clearRect(0, 0, W, H);
 
     const cx = W / 2;
-    const cy = H * 0.62;
+    const cy = H * 0.5;   // full circle — centre vertically
     const radius = Math.min(W, cy) - 20;
 
     const DB_FLOOR = -40;
@@ -989,7 +977,7 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
     [10, 20, 30, 40].forEach((dbDown) => {
       const r = radius * (1 - dbDown / 40);
       ctx.beginPath();
-      ctx.arc(cx, cy, r, Math.PI, 0);
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.strokeStyle = `rgba(26,115,232,${0.08 + ((40 - dbDown) / 40) * 0.12})`;
       ctx.lineWidth = 1;
       ctx.stroke();
@@ -1000,7 +988,7 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
     });
 
     // Spokes
-    [-90, -60, -45, -30, -15, 0, 15, 30, 45, 60, 90].forEach((a) => {
+    [0, 45, 90, 135, 180, 225, 270, 315].forEach((a) => {
       const rad = ((a - 90) * Math.PI) / 180;
       ctx.beginPath();
       ctx.moveTo(cx, cy);
@@ -1018,47 +1006,78 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
       );
     });
 
-    const drawPath = () => {
+    const faceOffsetsDeg = [0, 90, 180, 270];
+
+    // Draw fill for all 4 faces
+    faceOffsetsDeg.forEach((offsetDeg) => {
+      const offsetRad = (offsetDeg * Math.PI) / 180;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(offsetRad);
+
       ctx.beginPath();
       let first = true;
       this.anglesDeg.forEach((angle, i) => {
         const r = norm[i] * radius;
-        const rad = ((angle - 90) * Math.PI) / 180;
-        const px = cx + r * Math.cos(rad);
-        const py = cy + r * Math.sin(rad);
-        if (first) {
-          ctx.moveTo(px, py);
-          first = false;
-        } else ctx.lineTo(px, py);
+        const rad = ((angle - 90) * Math.PI) / 180; // 0° = North, clockwise
+        const px = r * Math.cos(rad);   // relative to (0,0) — cx/cy stripped
+        const py = r * Math.sin(rad);
+        if (first) { ctx.moveTo(px, py); first = false; }
+        else ctx.lineTo(px, py);
       });
       ctx.closePath();
-    };
 
-    drawPath();
-    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
-    grad.addColorStop(0, 'rgba(26,115,232,0.45)');
-    grad.addColorStop(1, 'rgba(26,115,232,0.05)');
-    ctx.fillStyle = grad;
-    ctx.fill();
+      // Gradient must also be relative to translated origin
+      const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, radius);
+      grad.addColorStop(0, 'rgba(26,115,232,0.25)');
+      grad.addColorStop(1, 'rgba(26,115,232,0.03)');
+      ctx.fillStyle = grad;
+      ctx.fill();
 
-    drawPath();
-    ctx.strokeStyle = '#1a73e8';
-    ctx.lineWidth = 1.8;
-    ctx.shadowColor = '#1a73e8';
-    ctx.shadowBlur = 6;
-    ctx.stroke();
-    ctx.shadowBlur = 0;
+      ctx.restore();
+    });
 
-    // Live steering marker (reads bfScanAngle, not stale steeringAngle)
-    const beamAngle = this.radarInfo?.beam_angle ?? this.bfScanAngle;
-    const steerRad = ((beamAngle - 90) * Math.PI) / 180;
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.lineTo(cx + radius * Math.cos(steerRad), cy + radius * Math.sin(steerRad));
-    ctx.strokeStyle = 'rgba(255,100,80,0.8)';
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([4, 3]);
-    ctx.stroke();
-    ctx.setLineDash([]);
+    // Draw stroke for all 4 faces (separate pass so shadow doesn't compound)
+    faceOffsetsDeg.forEach((offsetDeg) => {
+      const offsetRad = (offsetDeg * Math.PI) / 180;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(offsetRad);
+
+      ctx.beginPath();
+      let first = true;
+      this.anglesDeg.forEach((angle, i) => {
+        const r = norm[i] * radius;
+        const rad = ((angle - 90) * Math.PI) / 180; // 0° = North, clockwise
+        const px = r * Math.cos(rad);
+        const py = r * Math.sin(rad);
+        if (first) { ctx.moveTo(px, py); first = false; }
+        else ctx.lineTo(px, py);
+      });
+      ctx.closePath();
+
+      ctx.strokeStyle = '#1a73e8';
+      ctx.lineWidth = 1.8;
+      ctx.shadowColor = '#1a73e8';
+      ctx.shadowBlur = 6;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      ctx.restore();
+    });
+
+    // Draw one steering marker per face
+    faceOffsetsDeg.forEach((offsetDeg) => {
+      const beamAngle = this.radarInfo?.beam_angle ?? this.bfScanAngle;
+      const steerRad = (((beamAngle + offsetDeg) - 90) * Math.PI) / 180;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + radius * Math.cos(steerRad), cy + radius * Math.sin(steerRad));
+      ctx.strokeStyle = 'rgba(255,100,80,0.6)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 3]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    });
   }
 }

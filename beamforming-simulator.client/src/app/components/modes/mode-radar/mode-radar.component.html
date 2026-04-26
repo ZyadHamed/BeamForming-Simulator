@@ -43,52 +43,6 @@
         />
       </div>
 
-      <div class="ctrl-group">
-        <label class="ctrl-label">Phased Array Sweep</label>
-        <div class="toggle-row">
-          <button
-            class="toggle-btn"
-            [class.active]="sweepMode === 'full'"
-            (click)="sweepMode = 'full'"
-          >
-            Full 360°
-          </button>
-          <button
-            class="toggle-btn"
-            [class.active]="sweepMode === 'sector'"
-            (click)="sweepMode = 'sector'"
-          >
-            Sector
-          </button>
-        </div>
-      </div>
-
-      <div class="ctrl-group" *ngIf="sweepMode === 'sector'">
-        <label class="ctrl-label"
-          >Sector Min <span class="val">{{ sectorMin }}°</span></label
-        >
-        <input
-          type="range"
-          class="styled-slider"
-          min="-180"
-          max="0"
-          step="5"
-          [value]="sectorMin"
-          (input)="sectorMin = +$any($event.target).value"
-        />
-        <label class="ctrl-label" style="margin-top: 6px"
-          >Sector Max <span class="val">{{ sectorMax }}°</span></label
-        >
-        <input
-          type="range"
-          class="styled-slider"
-          min="0"
-          max="180"
-          step="5"
-          [value]="sectorMax"
-          (input)="sectorMax = +$any($event.target).value"
-        />
-      </div>
     </div>
 
     <!-- ── Hardware & Waveform ──────────────────────────────────────── -->
@@ -214,13 +168,15 @@
               <span class="tgt-meta">
                 PA · SNR {{ tgt.lastDetection.snr_db | number: '1.0-0' }} dB ·
                 {{ tgt.lastDetection.range_m / 1000 | number: '1.0-0' }} km ·
-                {{ tgt.lastDetection.angle_deg | number: '1.0-0' }}°
+                {{ tgt.lastDetection.angle_deg | number: '1.0-0' }}°.
+                {{ tgt.lastDetection.estimated_rcs }} m²
               </span>
             </div>
             <div *ngIf="tgt.trdLastDetection" style="margin-top: 2px">
               <span class="tgt-meta" style="color: var(--accent-green)">
                 TRD · SNR {{ tgt.trdLastDetection.snr_db | number: '1.0-0' }} dB ·
                 {{ tgt.trdLastDetection.range_m / 1000 | number: '1.0-0' }} km
+                {{ tgt.trdLastDetection.estimated_rcs }} m²
               </span>
             </div>
           </div>
@@ -234,7 +190,7 @@
       <div class="section-label">Array Configuration</div>
 
       <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px">
-        <span class="const-badge">Geometry: Linear</span>
+        <span class="const-badge">Geometry: 4-face Linear</span>
         <span class="const-badge">Wave Speed: 300,000.0 mm/µs</span>
         <span class="const-badge">Focus: Plane Wave</span>
         <span class="const-badge"

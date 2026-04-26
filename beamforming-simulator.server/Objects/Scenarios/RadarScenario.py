@@ -1,6 +1,12 @@
 import math
+import base64
+import io
 from dataclasses import dataclass
 from typing import List, Optional
+import concurrent.futures
+
+import numpy as np
+from PIL import Image
 
 import numpy as np
 
@@ -151,15 +157,103 @@ class RadarScenario(Scenario):
 
     def compute_interference_field(
         self,
-        width_mm:       float = 500.0,
-        depth_mm:       float = 500.0,
-        resolution_mm:  float = 2.0,
+        width_mm:      float = 500.0,
+        depth_mm:      float = 500.0,
+        resolution_mm: float = 2.0,
     ) -> "InterferenceFieldResult":
-        """Delegate to ArrayConfig and return the CW interference field."""
-        return self.config.compute_interference_field(
-            width_mm      = width_mm,
-            depth_mm      = depth_mm,
-            resolution_mm = resolution_mm,
+        """
+        4-face Aegis interference field via coherent complex superposition.
+        Each face's elements are rotated onto the global canvas; their complex
+        pressure fields are summed before taking magnitude, so inter-face
+        destructive/constructive interference is physically correct.
+        """
+        # ── 1. Global spatial grid (shared by all faces) ──────────────────
+        half = max(width_mm, depth_mm) / 2.0
+        x = np.arange(-half, half, resolution_mm)
+        z = np.arange(-half, half, resolution_mm)
+        xx, zz = np.meshgrid(x, z)          # (rows, cols)
+        rows, cols = xx.shape
+
+        active_indices = [i for i, el in enumerate(self.config.elements) if el.enabled]
+        if not active_indices:
+            empty = np.zeros((rows, cols), dtype=np.uint8)
+            img   = Image.fromarray(empty, mode='L')
+            buf   = io.BytesIO(); img.save(buf, format='PNG')
+            b64   = base64.b64encode(buf.getvalue()).decode('utf-8')
+            return InterferenceFieldResult(
+                image_base64=f"data:image/png;base64,{b64}",
+                cols=cols, rows=rows,
+            )
+
+        active_els  = [self.config.elements[i] for i in active_indices]
+        x_base      = self.config._element_x_positions()[active_indices]  # 1D, mm
+        z_base      = np.zeros_like(x_base)                               # linear → on X-axis
+
+        freqs       = np.array([el.frequency        for el in active_els])
+        omegas      = 2.0 * np.pi * freqs
+        ks          = omegas / self.config.wave_speed
+        phases      = np.array([el.get_phase_radians()  for el in active_els])
+        delays      = np.array([el.time_delay            for el in active_els])
+        total_phases= phases - (omegas * delays)
+        amplitudes  = np.array(
+            [(el.intensity / 100.0) * el.apodization_weight for el in active_els]
+        )
+
+        # ── 2. Master complex field — accumulate all 4 faces ─────────────
+        total_complex = np.zeros((rows, cols), dtype=complex)
+
+        face_offsets_deg = [0.0, 90.0, 180.0, 270.0]
+
+        for offset_deg in face_offsets_deg:
+            θ       = math.radians(offset_deg)
+            cos_θ   = math.cos(θ)
+            sin_θ   = math.sin(θ)
+
+            # Step A: rotate element positions onto this face's heading
+            xi = cos_θ * x_base - sin_θ * z_base   # rotated x, mm
+            zi = sin_θ * x_base + cos_θ * z_base   # rotated z, mm
+
+            # Step B: vectorised complex pressure field for this face
+            # Broadcasting shapes: grid (rows, cols, 1) × elements (1, 1, N)
+            xx_3d   = xx[:, :, np.newaxis]
+            zz_3d   = zz[:, :, np.newaxis]
+            xi_3d   = xi[np.newaxis, np.newaxis, :]
+            zi_3d   = zi[np.newaxis, np.newaxis, :]
+            k_3d    = ks          [np.newaxis, np.newaxis, :]
+            phi_3d  = total_phases[np.newaxis, np.newaxis, :]
+            amp_3d  = amplitudes  [np.newaxis, np.newaxis, :]
+
+            r = np.sqrt((xx_3d - xi_3d) ** 2 + (zz_3d - zi_3d) ** 2) + 1e-9
+            face_field = np.sum(
+                (amp_3d / np.sqrt(r)) * np.exp(1j * (-k_3d * r + phi_3d)),
+                axis=2,
+            )
+
+            # Step C: coherent addition — stay complex
+            total_complex += face_field
+
+        # ── 3. Post-processing ────────────────────────────────────────────
+        magnitude = np.abs(total_complex)
+        max_val   = np.max(magnitude)
+        if max_val > 0:
+            magnitude /= max_val
+
+        noise_std = 10 ** (-self.config.snr / 20)
+        magnitude = np.clip(
+            magnitude + np.random.normal(0, noise_std, magnitude.shape), 0, None
+        )
+        magnitude /= np.max(magnitude)
+
+        pixel_data = np.uint8(magnitude * 255)
+        img = Image.fromarray(pixel_data, mode='L')
+        buf = io.BytesIO()
+        img.save(buf, format='PNG')
+        b64 = base64.b64encode(buf.getvalue()).decode('utf-8')
+
+        return InterferenceFieldResult(
+            image_base64=f"data:image/png;base64,{b64}",
+            cols=cols,
+            rows=rows,
         )
 
     def perform_default_scan(
@@ -176,13 +270,6 @@ class RadarScenario(Scenario):
             num_range_bins = num_range_bins,
         )
 
-    # ── CHANGE A ──────────────────────────────────────────────────────────────
-    # STATUS: CORRECT logic; BUGGY doc — generate_traditional_scan() correctly
-    # uses a sinc² one-way gain pattern applied relative to the *physical*
-    # antenna pointing angle, with no steering delays or beamforming computation.
-    # This satisfies spec §2B ("Fixed sinc² beamform, Constant rotation θ(t)").
-    # NO CODE CHANGE needed here; docstring clarified.
-    # ─────────────────────────────────────────────────────────────────────────
     def generate_traditional_scan(
         self,
         start_angle:    float,
@@ -218,6 +305,7 @@ class RadarScenario(Scenario):
 
         for antenna_angle in angles_deg:
             power_bins = np.zeros(num_range_bins, dtype=float)
+            _target_meta: dict = {}
 
             for target in self.environment.targets:
                 r       = target.range_m
@@ -249,6 +337,7 @@ class RadarScenario(Scenario):
 
                 bin_idx = int(np.argmin(np.abs(ranges_m - r)))
                 power_bins[bin_idx] += snr_linear
+                _target_meta[target.target_id] = (pr_dbm, one_way_gain_db)
 
             cfar_thr = compute_cfar_threshold(power_bins, self._detection_cfg)
 
@@ -270,12 +359,27 @@ class RadarScenario(Scenario):
                     fd          = 2.0 * target.velocity_m_s * self.carrier_freq_hz / _C
                     doppler_m_s = fd * self.wavelength_m / 2.0
 
+                    # Estimate range from bin index, not ground-truth position
+                    estimated_range_m = bin_idx * self._waveform.range_resolution_m
+
+                    # Invert the radar equation to estimate RCS from received power
+                    pr_dbm_t, g1w_db = _target_meta.get(target.target_id, (pr_dbm, one_way_gain_db))
+                    pt_lin   = 10.0 ** ((pt_dbm  - 30.0) / 10.0)   # dBm → W
+                    pr_lin   = 10.0 ** ((pr_dbm   - 30.0) / 10.0)   # dBm → W
+                    g_lin    = 10.0 ** (one_way_gain_db / 10.0)
+                    lam      = self.wavelength_m
+                    r4       = max(estimated_range_m, 1.0) ** 4
+                    estimated_rcs = (
+                        pr_lin * (4.0 * math.pi) ** 3 * r4
+                        / (pt_lin * g_lin ** 2 * lam ** 2)
+                    )
+
                     detections.append(RadarDetection(
                         target_id     = target.target_id,
-                        range_m       = round(target.range_m, 1),
+                        range_m       = round(estimated_range_m, 1),
                         angle_deg     = round(float(antenna_angle), 1),
                         snr_db        = round(snr_db_bin, 1),
-                        estimated_rcs = target.rcs_sqm,
+                        estimated_rcs = round(estimated_rcs, 3),
                         doppler_m_s   = round(doppler_m_s, 2),
                     ))
 
@@ -290,13 +394,6 @@ class RadarScenario(Scenario):
             sweep_data = sweep_data,
         )
 
-    # ── CHANGE B ──────────────────────────────────────────────────────────────
-    # STATUS: CORRECT — generate_ppi_scan() correctly calls
-    # calculate_steering_delays() + compute_beamforming() for EVERY steer angle
-    # in the chunk, making beam steering purely electronic.  No physical rotation
-    # variable is involved here. Satisfies spec §2A.
-    # NO CODE CHANGE needed; docstring clarified.
-    # ─────────────────────────────────────────────────────────────────────────
     def generate_ppi_scan(
         self,
         start_angle:    float,
@@ -324,16 +421,164 @@ class RadarScenario(Scenario):
         )
         bin_width_m = float(ranges_m[1] - ranges_m[0]) if num_range_bins > 1 else max_range_m
 
-        sweep_data : List[dict]           = []
-        detections : List[RadarDetection] = []
-
         lam_db  = 20.0 * math.log10(self.wavelength_m)
         g0_db   = self.array_gain_db
         pt_dbm  = self._waveform.pt_dbm
 
+        face_offsets = [0.0, 90.0, 180.0, 270.0]
+
+        kwargs = dict(
+            angles_deg   = angles_deg,
+            ranges_m     = ranges_m,
+            bin_width_m  = bin_width_m,
+            max_range_m  = max_range_m,
+            pt_dbm       = pt_dbm,
+            g0_db        = g0_db,
+            lam_db       = lam_db,
+        )
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            futures = [
+                pool.submit(self._scan_single_face, offset, **kwargs)
+                for offset in face_offsets
+            ]
+            results = [f.result() for f in futures]
+
+        sweep_data: List[dict]           = []
+        detections: List[RadarDetection] = []
+        detected_ids: set                = set()
+
+        for face_sweep, face_detections in results:
+            sweep_data.extend(face_sweep)
+            for det in face_detections:
+                if det.target_id not in detected_ids:
+                    detected_ids.add(det.target_id)
+                    detections.append(det)
+
+        return RadarScanResult(
+            timestamp  = 0.0,
+            detections = detections,
+            sweep_data = sweep_data,
+        )
+    
+    def compute_beamforming_4face(self) -> "BeamformingResult":
+        """
+        Full 360° beam pattern via coherent complex superposition of 4 faces.
+        Each face contributes its array factor; results are summed as complex
+        numbers before magnitude, giving true inter-face interference.
+        """
+        from Objects.ArrayConfig import BeamformingResult
+
+        angles_deg = np.linspace(0, 360, 3601, endpoint=False)
+        angles_rad = np.deg2rad(angles_deg)
+
+        active_els  = [el for el in self.config.elements if el.enabled]
+        if not active_els:
+            dummy_db = np.full(len(angles_deg), -100.0)
+            ds = 20
+            return BeamformingResult(
+                beam_pattern_db = dummy_db[::ds].tolist(),
+                angles_deg      = angles_deg[::ds].tolist(),
+                beam_angle      = self.config.steering_angle,
+                side_lobe_level = -100.0,
+                main_lobe_width = 0.0,
+            )
+
+        x_base = self.config._element_x_positions()[
+            [i for i, el in enumerate(self.config.elements) if el.enabled]
+        ]
+        z_base = np.zeros_like(x_base)
+
+        freqs        = np.array([el.frequency           for el in active_els])
+        ks           = 2.0 * np.pi * freqs / self.config.wave_speed
+        base_phases  = np.array([el.get_phase_radians() for el in active_els]) \
+                     - (2.0 * np.pi * freqs * np.array([el.time_delay for el in active_els]))
+        amps         = np.array(
+            [(el.intensity / 100.0) * el.apodization_weight for el in active_els]
+        )
+
+        # Master complex AF — shape (num_angles,)
+        total_af = np.zeros(len(angles_deg), dtype=complex)
+
+        face_offsets_deg = [0.0, 90.0, 180.0, 270.0]
+
+        for offset_deg in face_offsets_deg:
+            θ     = math.radians(offset_deg)
+            cos_θ = math.cos(θ)
+            sin_θ = math.sin(θ)
+
+            # Rotate element positions onto this face's heading
+            xi = cos_θ * x_base - sin_θ * z_base
+            zi = sin_θ * x_base + cos_θ * z_base
+
+            # Far-field AF: AF = Σ A · exp(j(φ + k(x sinθ + z cosθ)))
+            # shapes: elements (N,1) × angles (1, num_angles)
+            spatial = (
+                ks[:, None] * (
+                    xi[:, None] * np.sin(angles_rad)[None, :]
+                  + zi[:, None] * np.cos(angles_rad)[None, :]
+                )
+            )
+            phasors  = amps[:, None] * np.exp(1j * (base_phases[:, None] + spatial))
+            total_af += np.sum(phasors, axis=0)   # coherent addition
+
+        beam_pattern = np.abs(total_af)
+        max_val = np.max(beam_pattern)
+        if max_val > 0:
+            beam_pattern /= max_val
+
+        noise_std    = 10 ** (-self.config.snr / 20)
+        beam_pattern = np.clip(
+            beam_pattern + np.random.normal(0, noise_std, beam_pattern.shape), 0, None
+        )
+        beam_pattern /= np.max(beam_pattern)
+
+        beam_pattern_db = 20.0 * np.log10(np.clip(beam_pattern, 1e-12, None))
+
+        # Main lobe / side lobe metrics (same logic as ArrayConfig)
+        peak_idx  = int(np.argmax(beam_pattern_db))
+        left_idx  = peak_idx
+        while left_idx > 0 and beam_pattern_db[left_idx - 1] >= -3.0:
+            left_idx -= 1
+        right_idx = peak_idx
+        while right_idx < len(beam_pattern_db) - 1 and beam_pattern_db[right_idx + 1] >= -3.0:
+            right_idx += 1
+
+        main_lobe_width  = float(angles_deg[right_idx] - angles_deg[left_idx])
+        side_lobe_mask   = np.ones(len(beam_pattern_db), dtype=bool)
+        side_lobe_mask[left_idx:right_idx + 1] = False
+        side_lobe_level  = float(np.max(beam_pattern_db[side_lobe_mask])) \
+                           if np.any(side_lobe_mask) else -100.0
+
+        ds = 20
+        return BeamformingResult(
+            beam_pattern_db = beam_pattern_db[::ds].tolist(),
+            angles_deg      = angles_deg[::ds].tolist(),
+            beam_angle      = self.config.steering_angle,
+            side_lobe_level = side_lobe_level,
+            main_lobe_width = main_lobe_width,
+        )
+
+    def _scan_single_face(
+        self,
+        face_offset:    float,
+        angles_deg:     np.ndarray,
+        ranges_m:       np.ndarray,
+        bin_width_m:    float,
+        max_range_m:    float,
+        pt_dbm:         float,
+        g0_db:          float,
+        lam_db:         float,
+    ) -> tuple[list, list]:
+        """Scan one virtual face. Returns (sweep_data, detections) for that face."""
+        sweep_data : List[dict]           = []
+        detections : List[RadarDetection] = []
+        num_range_bins = len(ranges_m)
+
         for steer_angle in angles_deg:
-            # Electronic steering: update phase delays, recompute beam
-            self.config.steering_angle = float(steer_angle)
+            global_steer = (float(steer_angle) + face_offset) % 360.0
+
+            self.config.steering_angle = global_steer
             self.config.calculate_steering_delays()
 
             beam_result = self.config.compute_beamforming(
@@ -353,7 +598,7 @@ class RadarScenario(Scenario):
                 if r > max_range_m or r < 1.0:
                     continue
 
-                rel_ang = (bearing - float(steer_angle) + 180.0) % 360.0 - 180.0
+                rel_ang = (bearing - global_steer + 180.0) % 360.0 - 180.0
                 rel_ang = max(-90.0, min(90.0, rel_ang))
 
                 relative_gain_db = float(np.interp(rel_ang, bp_ang, bp_db))
@@ -387,32 +632,40 @@ class RadarScenario(Scenario):
                     if abs(target.range_m - bin_range) > bin_width_m:
                         continue
 
-                    ang_sep = abs((target.bearing_deg - float(steer_angle) + 180) % 360 - 180)
+                    ang_sep = abs((target.bearing_deg - global_steer + 180) % 360 - 180)
                     if ang_sep > self.hpbw_deg / 2.0:
                         continue
+
+                    estimated_range_m = bin_idx * self._waveform.range_resolution_m
+
+                    pt_lin = 10.0 ** ((pt_dbm        - 30.0) / 10.0)
+                    pr_lin = 10.0 ** ((pr_dbm         - 30.0) / 10.0)
+                    g_lin  = 10.0 ** (one_way_gain_db          / 10.0)
+                    lam    = self.wavelength_m
+                    r4     = max(estimated_range_m, 1.0) ** 4
+                    estimated_rcs = (
+                        pr_lin * (4.0 * math.pi) ** 3 * r4
+                        / (pt_lin * g_lin ** 2 * lam ** 2)
+                    )
 
                     fd          = 2.0 * target.velocity_m_s * self.carrier_freq_hz / _C
                     doppler_m_s = fd * self.wavelength_m / 2.0
 
                     detections.append(RadarDetection(
                         target_id     = target.target_id,
-                        range_m       = round(target.range_m, 1),
-                        angle_deg     = round(float(steer_angle), 1),
+                        range_m       = round(estimated_range_m, 1),
+                        angle_deg     = round(global_steer, 1),
                         snr_db        = round(snr_db_bin, 1),
-                        estimated_rcs = target.rcs_sqm,
+                        estimated_rcs = round(estimated_rcs, 3),
                         doppler_m_s   = round(doppler_m_s, 2),
                     ))
 
             sweep_data.append({
-                "angle_deg":  float(steer_angle),
+                "angle_deg":  global_steer,
                 "range_bins": self._log_compress(power_bins).tolist(),
             })
 
-        return RadarScanResult(
-            timestamp  = 0.0,
-            detections = detections,
-            sweep_data = sweep_data,
-        )
+        return sweep_data, detections
 
     @staticmethod
     def _log_compress(
