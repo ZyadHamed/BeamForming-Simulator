@@ -65,6 +65,17 @@ export interface RadarSetupRequest {
   noise_floor_dbm: number;
   wave_speed: number;
   elements: RadarElementInput[];
+  // Waveform
+  pt_dbm: number;
+  prf_hz: number;
+  pulse_width_us: number;
+  // Environment
+  clutter_floor_dbm: number;
+  clutter_range_exp: number;
+  // Detector
+  cfar_guard_cells: number;
+  cfar_ref_cells: number;
+  cfar_pfa: number;
 }
 // ── 5G Interfaces ──────────────────────────────────────────────────
 export interface Tower5GRequest {
@@ -81,6 +92,7 @@ export interface User5GRequest {
   x_m: number;
   y_m: number;
   allocated_frequency_mhz: number;
+  current_tower_id: string | null;
 }
 
 export interface LinkQuality {
@@ -99,10 +111,42 @@ export interface NetworkStateResult {
   dropped_users: string[];
 }
 
+/** Shape of one sector returned by GET /5g-scenario/tower-beams/:id */
+export interface SectorBeamData {
+  name: string;
+  boresight_deg: number;
+  steering_angle_deg: number;
+  global_pointing_deg: number;
+  scan_angles_deg: number[];
+  beam_pattern_db: number[];
+  array_config: {
+    num_elements: number;
+    element_spacing_mm: number;
+    frequency_mhz: number;
+    apodization: string;
+    snr_db: number;
+  };
+}
+
+export interface TowerBeamsResponse {
+  tower_id: string;
+  sectors: SectorBeamData[];
+}
+
+export interface TowerConfigUpdateRequest {
+  tower_id: string;
+  apodization: string;
+  snr: number;
+  kaiser_beta?: number;
+  num_elements?: number;
+  element_spacing_mm?: number;
+}
+
+
 // ── Environment switch ─────────────────────────────────────────────
 const USE_MOCK = false; // ← flip to false once backend is live
-const API_BASE = ''; // ← configure to match your backend
-const WS_BASE = 'ws://localhost:8000';
+const API_BASE = 'http://localhost:8000'; // ← configure to match your backend
+const WS_BASE = 'WS://localhost:8000';
 
 @Injectable({ providedIn: 'root' })
 export class BeamformingService {
@@ -192,7 +236,6 @@ private trdScanResult$ = new Subject<{ sweep_data: any[]; detections: any[] }>()
 openScanSockets(): void {
   this.closeScanSockets();
 
-  // Phased-array socket
   this.bfSocket = new WebSocket(`${WS_BASE}/radar/scan`);
   this.bfSocket.onmessage = (ev) => {
     try { this.bfScanResult$.next(JSON.parse(ev.data)); } catch {}
@@ -223,6 +266,18 @@ sendBfScanSlice(req: object): void {
 sendTrdScanSlice(req: object): void {
   if (this.trdSocket?.readyState === WebSocket.OPEN) {
     this.trdSocket.send(JSON.stringify({ ...req, radar_type: 'traditional' }));
+  }
+}
+
+sendBfReady(): void {
+  if (this.bfSocket?.readyState === WebSocket.OPEN) {
+    this.bfSocket.send('READY');
+  }
+}
+
+sendTrdReady(): void {
+  if (this.trdSocket?.readyState === WebSocket.OPEN) {
+    this.trdSocket.send('READY');
   }
 }
 
@@ -278,6 +333,22 @@ get trdScanResults$(): Observable<{ sweep_data: any[]; detections: any[] }> {
    */
   updateUsers(users: User5GRequest[]): Observable<NetworkStateResult> {
     return this.http.post<NetworkStateResult>(`${API_BASE}/5g-scenario/update-users`, { users });
+  }
+
+  /**
+   * Fetch polar beam-pattern data for all 3 sectors of a tower.
+   * GET /5g-scenario/tower-beams/:towerId
+   */
+  getTowerBeams(towerId: string): Observable<TowerBeamsResponse> {
+    return this.http.get<TowerBeamsResponse>(`${API_BASE}/5g-scenario/tower-beams/${towerId}`);
+  }
+
+  /**
+   * Update apodization / SNR for a tower and get back fresh beam patterns.
+   * POST /5g-scenario/update-tower-config
+   */
+  updateTowerConfig(req: TowerConfigUpdateRequest): Observable<TowerBeamsResponse> {
+    return this.http.post<TowerBeamsResponse>(`${API_BASE}/5g-scenario/update-tower-config`, req);
   }
 
   // ── Mock implementations ───────────────────────────────────────

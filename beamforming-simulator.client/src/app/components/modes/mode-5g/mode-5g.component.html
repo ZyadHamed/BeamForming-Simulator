@@ -75,7 +75,7 @@
     <!-- ── Selected tower controls ────────────────────────────── -->
     <ng-container *ngIf="selectedTower">
 
-      <!-- Coverage range slider -->
+      <!-- Coverage radius -->
       <div class="coverage-slider-panel">
         <div class="section-label" style="padding:8px 12px 4px">
           BS{{ towers.indexOf(selectedTower)+1 }} Coverage Radius
@@ -86,6 +86,36 @@
                  [ngModel]="selectedTowerRange"
                  (ngModelChange)="selectedTowerRange=$event" />
           <span class="coverage-value">{{ selectedTowerRange }} px</span>
+        </div>
+      </div>
+
+      <!-- ── Apodization + SNR ────────────────────────────────── -->
+      <div class="apod-snr-panel">
+        <div class="section-label" style="padding:8px 12px 4px">
+          BS{{ towers.indexOf(selectedTower)+1 }} Array Config
+        </div>
+        <div class="apod-snr-body">
+
+          <!-- Apodization window -->
+          <div class="ctrl-row">
+            <label class="ctrl-label">Apodization</label>
+            <select class="ctrl-select"
+                    [(ngModel)]="selectedTower.apodization"
+                    (ngModelChange)="onApodizationChange(selectedTower)">
+              <option *ngFor="let a of apodOptions" [value]="a">{{ a }}</option>
+            </select>
+          </div>
+
+          <!-- SNR slider -->
+          <div class="ctrl-row">
+            <label class="ctrl-label">SNR</label>
+            <input type="range" class="coverage-slider"
+                   min="0" max="120" step="1"
+                   [(ngModel)]="selectedTower.snr"
+                   (ngModelChange)="onSnrChange(selectedTower)" />
+            <span class="coverage-value">{{ selectedTower.snr }} dB</span>
+          </div>
+
         </div>
       </div>
 
@@ -121,6 +151,13 @@
         <div class="section-label" style="padding:8px 12px 4px">
           BS{{ towers.indexOf(selectedTower)+1 }} — Sector Beam Patterns
         </div>
+
+        <!-- Data source badge -->
+        <div class="beam-source-badge" [class.backend]="selectedTower.beamData">
+          {{ selectedTower.beamData ? '⬆ Backend data' : '⚙ Local computation' }}
+        </div>
+
+        <!-- Sector tabs -->
         <div class="sector-tabs">
           <button *ngFor="let s of sectorNames" class="sector-tab"
                   [class.active]="activeSectorTab===s"
@@ -129,19 +166,20 @@
             {{ s }}
           </button>
         </div>
+
+        <!-- Polar canvas -->
         <div class="polar-wrap">
           <canvas #polarCanvas class="polar-canvas" width="240" height="240"></canvas>
           <div class="polar-hint">All 3 sectors shown · active sector highlighted</div>
         </div>
+
+        <!-- Parameters table -->
         <div class="sector-params-wrap">
           <table class="sector-params-table">
             <tbody>
               <tr *ngFor="let p of activeSectorParams">
                 <td class="sp-label">{{ p.label }}</td>
-                <td class="sp-value"
-                    [class.sp-highlight]="p.label==='Steering Angle'||p.label==='Global Pointing'">
-                  {{ p.value }}
-                </td>
+                <td class="sp-value" [class.sp-highlight]="p.highlight">{{ p.value }}</td>
               </tr>
             </tbody>
           </table>
@@ -171,6 +209,20 @@
         </div>
       </div>
     </div>
+    <!-- Live beam panel — shown when a UE is selected -->
+<div class="live-beam-panel" *ngIf="liveBeamTower && liveBeamUser">
+  <div class="section-label">
+    Live Beam — {{ liveBeamUser.label }}
+    → BS{{ towers.indexOf(liveBeamTower)+1 }}
+    ({{ liveBeamUser.sector_name }})
+  </div>
+  <canvas #liveBeamCanvas width="200" height="200" class="live-beam-canvas"></canvas>
+  <div class="live-beam-stats">
+    <span>SNR {{ liveBeamUser.snr_db.toFixed(1) }} dB</span>
+    <span>{{ liveBeamUser.data_rate_mbps.toFixed(0) }} Mbps</span>
+    <span>θ = {{ liveBeamUser.local_beam_angle.toFixed(1) }}°</span>
+  </div>
+</div>
   </main>
 
 </div>

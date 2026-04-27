@@ -17,7 +17,6 @@ import { BeamformingService } from '../../../services/beamforming.service';
 
 interface DetectionData {
   snr_db: number;
-  doppler_m_s: number;
   estimated_rcs: number;
   range_m: number;
   angle_deg: number;
@@ -28,6 +27,7 @@ interface RadarTarget {
   angle: number; // bearing degrees, 0 = North, clockwise
   range: number; // normalised 0–1 relative to maxRangeKm
   rcs: number; // m² — controls both visual size and radar cross-section
+  velocity_m_s: number; // radial velocity for Doppler (m/s, positive = receding)
   label: string;
   lastDetection: DetectionData | null;
   trdLastDetection: DetectionData | null;
@@ -50,8 +50,9 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
   // ── Public state ─────────────────────────────────────────────────────────
   targets: RadarTarget[] = [];
 
-  bfScanSpeedDegPerFrame: number = 1.2; // PA electronic steering speed
+  steerSpeedDegPerBatch: number = 15; // degrees covered per scan batch, user-controlled
   readonly TRD_ROT_DEG_PER_FRAME = 0.5; // traditional — fixed mechanical rate
+  readonly Math = Math;
 
   scanRange: number = 1;
   sweepMode: 'sector' | 'full' = 'full';
@@ -59,15 +60,26 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
   sectorMax: number = 60;
   numElements: number = 12;
   elementSpacing: number = 15.0;
-  steeringAngle: number = 0.0;
   apodization: string = 'hanning';
-  snr: number = 60.0;
   frequencyGhz: number = 9.5;
   readonly apodizationOptions = ['none', 'hanning', 'hamming', 'blackman'];
 
   txPower: number = 70.0;
   prfHz: number = 1000.0;
   pulseWidthUs: number = 1.0;
+
+  // Environment
+  noiseFloorDbm: number = -100.0;
+  clutterFloorDbm: number = -200.0;
+  clutterRangeExp: number = -20.0;
+
+  // Detector
+  cfarGuardCells: number = 2;
+  cfarRefCells: number = 8;
+  cfarPfa: number = 1e-4;
+
+  snr: number = 60.0;
+
   radarInfo: any = null;
 
   interferenceImage: string | null = null;
@@ -80,7 +92,6 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
   private anglesDeg: number[] = [];
 
   private bfScanAngle: number = 0;
-  private bfScanDir: number = 1;
 
   private trdAngle: number = 0;
 
@@ -96,6 +107,9 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
   private trdFullRotDeg: number = 0;
   private bfFullRotDeg: number = 0;
 
+  private bfWaitingForAck: boolean = false;
+  private trdWaitingForAck: boolean = false;
+
   // ── Environment canvas drag / resize state ────────────────────────────────
   private envDragTarget: RadarTarget | null = null;
   private envResizeTarget: RadarTarget | null = null;
@@ -104,23 +118,18 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   // ── Computed properties ───────────────────────────────────────────────────
   get physicalBeamWidthDeg(): number {
-    if (this.radarInfo?.hpbw_deg) return this.radarInfo.hpbw_deg;
-    const lambda = (300_000.0 * 1e6) / (this.frequencyGhz * 1e9) / 1000.0;
-    const N = Math.max(this.numElements, 1);
-    const d = this.elementSpacing / 1000;
-    const aperture = Math.max((N - 1) * d, d);
-    return Math.min(90, Math.max(1, (((0.886 * lambda) / aperture) * 180) / Math.PI));
-  }
+  return this.radarInfo?.hpbw_deg ?? 0;
+}
 
   get rangeResolutionM(): number {
-    return this.radarInfo?.range_resolution_m ?? 150 * this.pulseWidthUs;
-  }
+  return this.radarInfo?.range_resolution_m ?? 0;
+}
 
   get maxUnambRangeKm(): number {
-    return this.radarInfo?.max_unambiguous_range_m != null
-      ? this.radarInfo.max_unambiguous_range_m / 1000
-      : 300_000.0 / (2 * this.prfHz) / 1e6;
-  }
+  return this.radarInfo?.max_unambiguous_range_m != null
+    ? this.radarInfo.max_unambiguous_range_m / 1000
+    : 0;
+}
 
   get sideLobeLevel(): number {
     return this.radarInfo?.side_lobe_level ?? -13.5;
@@ -158,31 +167,16 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
   ngOnInit(): void {
     this.targets = [
       {
-        id: 't1',
-        angle: 35,
-        range: 0.55,
-        rcs: 5,
-        label: 'TGT-A',
-        lastDetection: null,
-        trdLastDetection: null,
+        id: 't1', angle: 35, range: 0.55, rcs: 5, velocity_m_s: 0,
+        label: 'TGT-A', lastDetection: null, trdLastDetection: null,
       },
       {
-        id: 't2',
-        angle: 120,
-        range: 0.7,
-        rcs: 3,
-        label: 'TGT-B',
-        lastDetection: null,
-        trdLastDetection: null,
+        id: 't2', angle: 120, range: 0.7, rcs: 3, velocity_m_s: 0,
+        label: 'TGT-B', lastDetection: null, trdLastDetection: null,
       },
       {
-        id: 't3',
-        angle: 220,
-        range: 0.4,
-        rcs: 8,
-        label: 'TGT-C',
-        lastDetection: null,
-        trdLastDetection: null,
+        id: 't3', angle: 220, range: 0.4, rcs: 8, velocity_m_s: 0,
+        label: 'TGT-C', lastDetection: null, trdLastDetection: null,
       },
     ];
 
@@ -198,6 +192,9 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
         this.anglesDeg = res.angles_deg ?? [];
         setTimeout(() => this.drawPatternCanvas(), 0);
         this.cdr.markForCheck();
+        // Kick the client-pull loop now that radar is confirmed ready
+        this.sendBfBatch();
+        this.sendTrdBatch();
       },
       error: (e) => console.warn('Radar setup failed:', e),
     });
@@ -205,57 +202,92 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.beamSvc.openScanSockets();
 
     this.beamSvc.bfScanResults$.subscribe((res) => {
-      if (res?.sweep_data) this.paintBfCanvas(res.sweep_data);
-      if (res?.detections?.length) {
-        this.targets.forEach((tgt) => {
-          const d = res.detections.find((x: any) => x.target_id === tgt.id);
-          if (d) tgt.lastDetection = {
-            snr_db: d.snr_db, doppler_m_s: d.doppler_m_s,
-            estimated_rcs: d.estimated_rcs, range_m: d.range_m, angle_deg: d.angle_deg,
-          };
-        });
-        this.zone.run(() => this.cdr.markForCheck());
-      }
-      
-      if (res.interference_image) {
-        this.interferenceImage = res.interference_image;
-        this.interferenceSize  = res.interference_cols
-          ? { cols: res.interference_cols, rows: res.interference_rows ?? 0 }
-          : this.interferenceSize;
-        this.cdr.markForCheck();
-      }
-      
-      if (res.beam_pattern) {
-        this.beamPattern = res.beam_pattern;
-        this.anglesDeg   = res.angles_deg ?? this.anglesDeg;
-        if (res.beam_angle != null || res.main_lobe_width != null || res.side_lobe_level != null) {
-          this.radarInfo = {
-            ...this.radarInfo,
-            beam_angle     : res.beam_angle      ?? this.radarInfo?.beam_angle,
-            main_lobe_width: res.main_lobe_width ?? this.radarInfo?.main_lobe_width,
-            side_lobe_level: res.side_lobe_level ?? this.radarInfo?.side_lobe_level,
-          };
+      try {
+        if (res?.sweep_data) {
+          this.paintBfCanvas(res.sweep_data);
+          const batchDeg = res.sweep_data.length;
+          this.bfScanAngle = (this.bfScanAngle + batchDeg) % 360;
+          this.bfFullRotDeg += batchDeg;
+          if (this.bfFullRotDeg >= 360) {
+            this.bfFullRotDeg = 0;
+            this.bfPaintCtx.clearRect(0, 0, this.bfPaint.width, this.bfPaint.height);
+            this.targets.forEach((t) => (t.lastDetection = null));
+            this.zone.run(() => this.cdr.markForCheck());
+          }
         }
-        this.drawPatternCanvas();
+        if (res?.detections?.length) {
+          this.targets.forEach((tgt) => {
+            const d = res.detections.find((x: any) => x.target_id === tgt.id);
+            if (d) tgt.lastDetection = {
+              snr_db: d.snr_db,
+              estimated_rcs: d.estimated_rcs, range_m: d.range_m, angle_deg: d.angle_deg,
+            };
+          });
+          this.zone.run(() => this.cdr.markForCheck());
+        }
+        if (res.interference_image) {
+          this.interferenceImage = res.interference_image;
+          this.interferenceSize  = res.interference_cols
+            ? { cols: res.interference_cols, rows: res.interference_rows ?? 0 }
+            : this.interferenceSize;
+          this.cdr.markForCheck();
+        }
+        if (res.beam_pattern) {
+          this.beamPattern = res.beam_pattern;
+          this.anglesDeg   = res.angles_deg ?? this.anglesDeg;
+          if (res.beam_angle != null || res.main_lobe_width != null || res.side_lobe_level != null) {
+            this.radarInfo = {
+              ...this.radarInfo,
+              beam_angle     : res.beam_angle      ?? this.radarInfo?.beam_angle,
+              main_lobe_width: res.main_lobe_width ?? this.radarInfo?.main_lobe_width,
+              side_lobe_level: res.side_lobe_level ?? this.radarInfo?.side_lobe_level,
+            };
+          }
+          this.drawPatternCanvas();
+        }
+      } catch (e) {
+        console.warn('bf paint error:', e);
+      } finally {
+        // Always re-arm the loop, even if painting threw
+        this.bfWaitingForAck = false;
+        this.sendBfBatch();
       }
     });
 
     this.beamSvc.trdScanResults$.subscribe((res) => {
-      if (res?.sweep_data) this.paintTrdCanvas(res.sweep_data);
-      if (res?.detections?.length) {
-        this.targets.forEach((tgt) => {
-          const d = res.detections.find((x: any) => x.target_id === tgt.id);
-          if (d) tgt.trdLastDetection = {
-            snr_db: d.snr_db, doppler_m_s: d.doppler_m_s,
-            estimated_rcs: d.estimated_rcs, range_m: d.range_m, angle_deg: d.angle_deg,
-          };
-        });
-        this.zone.run(() => this.cdr.markForCheck());
+      try {
+        if (res?.sweep_data) {
+          this.paintTrdCanvas(res.sweep_data);
+          const batchDeg = res.sweep_data.length * this.TRD_ROT_DEG_PER_FRAME;
+          this.trdAngle = (this.trdAngle + batchDeg) % 360;
+          this.trdFullRotDeg += batchDeg;
+          if (this.trdFullRotDeg >= 360) {
+            this.trdFullRotDeg = 0;
+            this.trdPaintCtx.clearRect(0, 0, this.trdPaint.width, this.trdPaint.height);
+            this.targets.forEach((t) => (t.trdLastDetection = null));
+            this.zone.run(() => this.cdr.markForCheck());
+          }
+        }
+        if (res?.detections?.length) {
+          this.targets.forEach((tgt) => {
+            const d = res.detections.find((x: any) => x.target_id === tgt.id);
+            if (d) tgt.trdLastDetection = {
+              snr_db: d.snr_db,
+              estimated_rcs: d.estimated_rcs, range_m: d.range_m, angle_deg: d.angle_deg,
+            };
+          });
+          this.zone.run(() => this.cdr.markForCheck());
+        }
+      } catch (e) {
+        console.warn('trd paint error:', e);
+      } finally {
+        this.trdWaitingForAck = false;
+        this.sendTrdBatch();
       }
     });
   }
 
-  ngAfterViewInit(): void {
+ ngAfterViewInit(): void {
     const mkOffscreen = (ref: ElementRef<HTMLCanvasElement>) => {
       const c = document.createElement('canvas');
       const el = ref.nativeElement;
@@ -272,6 +304,12 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
 
     this.initEnvCanvas();
     this.startAnimation();
+
+    // Paint contexts are now ready. If setupRadar already resolved, kick
+    // the loops immediately; otherwise radarReady is still false and the
+    // setupRadar callback will call these once it resolves.
+    this.sendBfBatch();
+    this.sendTrdBatch();
   }
 
   ngOnDestroy(): void {
@@ -311,6 +349,7 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
       angle: Math.random() * 360,
       range: 0.3 + Math.random() * 0.6,
       rcs: 5,
+      velocity_m_s: 0,
       label: `TGT-${String.fromCharCode(65 + (idx % 26))}`,
       lastDetection: null,
       trdLastDetection: null,
@@ -329,25 +368,28 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   private buildRadarSetupRequest(): any {
     return {
-      num_elements: this.numElements,
-      element_spacing: this.elementSpacing,
-      frequency_mhz: this.frequencyGhz * 1000,
-      geometry: 'linear',
-      curvature_radius: 0.0,
-      steering_angle: this.bfScanAngle,
-      focus_depth: 0.0,
-      snr: this.snr,
-      apodization: this.apodization,
-      noise_floor_dbm: -100.0,
-      clutter_floor_dbm: -200.0,
-      clutter_range_exp: -20.0,
-      cfar_guard_cells: 2,
-      cfar_ref_cells: 8,
-      cfar_pfa: 1e-4,
-      pt_dbm: this.txPower,
-      prf_hz: this.prfHz,
-      pulse_width_us: this.pulseWidthUs,
-      wave_speed: 300_000.0,
+      num_elements:      this.numElements,
+      element_spacing:   this.elementSpacing,
+      frequency_mhz:     this.frequencyGhz * 1000,
+      geometry:          'linear',
+      curvature_radius:  0.0,
+      steering_angle:    this.bfScanAngle,
+      focus_depth:       0.0,
+      snr:               this.snr,          // fixed render quality; not a physics param
+      apodization:       this.apodization,
+      // Waveform
+      pt_dbm:            this.txPower,
+      prf_hz:            this.prfHz,
+      pulse_width_us:    this.pulseWidthUs,
+      // Environment — now driven by sliders
+      noise_floor_dbm:   this.noiseFloorDbm,
+      clutter_floor_dbm: this.clutterFloorDbm,
+      clutter_range_exp: this.clutterRangeExp,
+      // Detector — now driven by sliders
+      cfar_guard_cells:  this.cfarGuardCells,
+      cfar_ref_cells:    this.cfarRefCells,
+      cfar_pfa:          this.cfarPfa,
+      wave_speed:        300_000.0,
     };
   }
 
@@ -358,8 +400,8 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
       target_id: t.id,
       x_m: range_m * Math.sin(angle_rad),
       y_m: range_m * Math.cos(angle_rad),
-      velocity_m_s: 0,
-      rcs_sqm: t.rcs, // directly drives radar return strength
+      velocity_m_s: t.velocity_m_s,   // feeds Doppler: fd = 2·v·fc / c
+      rcs_sqm: t.rcs,
     };
   }
 
@@ -441,6 +483,7 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
             angle: angleDeg,
             range: r,
             rcs: 5,
+            velocity_m_s: 0,
             label: `TGT-${String.fromCharCode(65 + (idx % 26))}`,
             lastDetection: null,
             trdLastDetection: null,
@@ -649,67 +692,50 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
   // ANIMATION LOOP
   // ─────────────────────────────────────────────────────────────────────────
 
+  private readonly BATCH_LINES = 15; // degrees per network round-trip
+
   private startAnimation(): void {
     this.zone.runOutsideAngular(() => {
       const loop = () => {
-        this.advanceBfScan();
-        this.advanceTrdScan();
-
-        if (this.radarReady) {
-          this.beamSvc.sendBfScanSlice({
-            start_angle   : this.bfScanAngle,
-            end_angle     : this.bfScanAngle + this.bfScanSpeedDegPerFrame,
-            num_lines     : 1,
-            max_range_m   : this.scanRange * this.maxRangeKm * 1000,
-            num_range_bins: 128,
-            targets       : this.targets.map((t) => this.toTargetDTO(t)),
-            radar_type    : 'phased_array',
-            // backend will replicate this slice across all 4 faces internally
-          });
-
-          this.beamSvc.sendTrdScanSlice({
-            start_angle   : this.trdAngle,
-            end_angle     : this.trdAngle + this.TRD_ROT_DEG_PER_FRAME,
-            num_lines     : 1,
-            max_range_m   : this.scanRange * this.maxRangeKm * 1000,
-            num_range_bins: 128,
-            targets       : this.targets.map((t) => this.toTargetDTO(t)),
-            radar_type    : 'traditional',
-          });
-        }
-
+        // Canvas draws use the angles that were already advanced in the
+        // subscription callbacks after each ack, so no angle math here.
         this.drawEnvCanvas();
         this.drawBeamformingCanvas();
         this.drawTraditionalCanvas();
-
         this.animId = requestAnimationFrame(loop);
       };
       loop();
     });
   }
 
-  private advanceBfScan(): void {
-    this.bfScanAngle = (this.bfScanAngle + this.bfScanSpeedDegPerFrame) % 360;
-    this.bfFullRotDeg += this.bfScanSpeedDegPerFrame;
-
-    if (this.bfFullRotDeg >= 360) {
-    this.bfFullRotDeg = 0;
-    this.bfPaintCtx.clearRect(0, 0, this.bfPaint.width, this.bfPaint.height);
-    this.targets.forEach((t) => (t.lastDetection = null));
-    }
+  private sendBfBatch(): void {
+    if (!this.radarReady || this.bfWaitingForAck || !this.bfPaintCtx) return;
+    this.bfWaitingForAck = true;
+    this.beamSvc.sendBfScanSlice({
+      start_angle   : this.bfScanAngle,
+      end_angle     : this.bfScanAngle + this.steerSpeedDegPerBatch,
+      num_lines     : Math.max(1, Math.round(this.steerSpeedDegPerBatch)),
+      max_range_m   : this.scanRange * this.maxRangeKm * 1000,
+      num_range_bins: 128,
+      targets       : this.targets.map((t) => this.toTargetDTO(t)),
+      radar_type    : 'phased_array',
+    });
   }
 
-  private advanceTrdScan(): void {
-    this.trdAngle = (this.trdAngle + this.TRD_ROT_DEG_PER_FRAME) % 360;
-    this.trdFullRotDeg += this.TRD_ROT_DEG_PER_FRAME;
-
-    if (this.trdFullRotDeg >= 360) {
-    this.trdFullRotDeg = 0;
-    this.trdPaintCtx.clearRect(0, 0, this.trdPaint.width, this.trdPaint.height);
-    this.targets.forEach((t) => (t.trdLastDetection = null));
-    }
+  private sendTrdBatch(): void {
+    if (!this.radarReady || this.trdWaitingForAck || !this.trdPaintCtx) return;
+    this.trdWaitingForAck = true;
+    this.beamSvc.sendTrdScanSlice({
+      start_angle   : this.trdAngle,
+      end_angle     : this.trdAngle + this.TRD_ROT_DEG_PER_FRAME * this.BATCH_LINES,
+      num_lines     : this.BATCH_LINES,
+      max_range_m   : this.scanRange * this.maxRangeKm * 1000,
+      num_range_bins: 128,
+      targets       : this.targets.map((t) => this.toTargetDTO(t)),
+      radar_type    : 'traditional',
+    });
   }
- 
+
   // ─────────────────────────────────────────────────────────────────────────
   // RENDERING
   // ─────────────────────────────────────────────────────────────────────────
@@ -732,7 +758,7 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
 
       for (let i = 0; i < numBins; i++) {
         const intensity = bins[i];
-        if (intensity < 0.02) continue;
+        if (intensity < 0.08) continue;
 
         const r0 = (i / numBins) * R;
         const r1 = ((i + 1) / numBins) * R;
@@ -771,7 +797,7 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
 
       for (let i = 0; i < numBins; i++) {
         const intensity = bins[i];
-        if (intensity < 0.02) continue;
+        if (intensity < 0.08) continue;
 
         const r0 = (i / numBins) * R;
         const r1 = ((i + 1) / numBins) * R;
@@ -799,6 +825,10 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
 
     const W = (canvas.width = canvas.offsetWidth || 360);
     const H = (canvas.height = canvas.offsetHeight || 360);
+    if (canvas.width !== W || canvas.height !== H) {
+    canvas.width = W;
+    canvas.height = H;
+    }
     const cx = W / 2,
       cy = H / 2;
     const R = Math.min(W, H) / 2 - 16;
@@ -856,6 +886,10 @@ export class ModeRadarComponent implements OnInit, AfterViewInit, OnDestroy {
 
     const W = (canvas.width = canvas.offsetWidth || 360);
     const H = (canvas.height = canvas.offsetHeight || 360);
+    if (canvas.width !== W || canvas.height !== H) {
+    canvas.width = W;
+    canvas.height = H;
+    }
     const cx = W / 2,
       cy = H / 2;
     const R = Math.min(W, H) / 2 - 16;

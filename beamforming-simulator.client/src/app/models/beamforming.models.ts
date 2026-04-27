@@ -95,7 +95,7 @@ export function makeDefaultArrayConfig(numElements: number = 4): ArrayConfig {
     elements           : Array.from({ length: numElements }, (_, i) => makeDefaultElement(i)),
     steeringAngle      : 0,
     focusDepth         : 0,
-    elementSpacing     : 5,
+    elementSpacing     : 43.5,
     geometry           : 'linear',
     curvatureRadius    : 60,
     numElements,

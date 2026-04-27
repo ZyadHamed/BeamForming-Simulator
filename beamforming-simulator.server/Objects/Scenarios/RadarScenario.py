@@ -10,7 +10,7 @@ from PIL import Image
 
 import numpy as np
 
-from Objects.ArrayConfig import ArrayConfig
+from Objects.ArrayConfig import ArrayConfig, BeamformingResult
 from Objects.Physics.RadarEnviroment import RadarEnvironment, RadarTarget
 from Objects.Scenarios.Scenario import Scenario
 from Objects.ArrayConfig import ArrayConfig, InterferenceFieldResult
@@ -50,7 +50,6 @@ class RadarDetection:
     angle_deg:     float
     snr_db:        float
     estimated_rcs: float
-    doppler_m_s:   float
 
 
 @dataclass
@@ -63,8 +62,10 @@ class RadarScanResult:
 def compute_cfar_threshold(power_bins: np.ndarray, cfg: RadarDetectionConfig) -> np.ndarray:
     """Compute the CA-CFAR detection threshold for every range bin."""
     n       = len(power_bins)
-    n_ref   = 2 * cfg.ref_cells
-    alpha   = n_ref * (cfg.pfa ** (-1.0 / n_ref) - 1.0)
+    n_ref = 2 * cfg.ref_cells
+    if n_ref == 0:
+        return np.full(len(power_bins), np.inf)
+    alpha = n_ref * (cfg.pfa ** (-1.0 / n_ref) - 1.0)
     half_w  = cfg.guard_cells + cfg.ref_cells
 
     thresholds = np.full(n, np.nan)
@@ -88,7 +89,9 @@ def compute_cfar_threshold(power_bins: np.ndarray, cfg: RadarDetectionConfig) ->
 
     nan_mask = np.isnan(thresholds)
     if nan_mask.any():
-        thresholds[nan_mask] = float(np.mean(power_bins))
+        valid_vals = thresholds[~nan_mask]
+        fill = float(np.min(valid_vals)) if valid_vals.size > 0 else alpha * float(np.mean(power_bins[~nan_mask]) if (~nan_mask).any() else 1.0)
+        thresholds[nan_mask] = fill
 
     return thresholds
 
@@ -169,8 +172,8 @@ class RadarScenario(Scenario):
         """
         # ── 1. Global spatial grid (shared by all faces) ──────────────────
         half = max(width_mm, depth_mm) / 2.0
-        x = np.arange(-half, half, resolution_mm)
-        z = np.arange(-half, half, resolution_mm)
+        x = np.arange(-half, half, max(resolution_mm, 1.0))
+        z = np.arange(-half, half, max(resolution_mm, 1.0))
         xx, zz = np.meshgrid(x, z)          # (rows, cols)
         rows, cols = xx.shape
 
@@ -338,6 +341,13 @@ class RadarScenario(Scenario):
                 bin_idx = int(np.argmin(np.abs(ranges_m - r)))
                 power_bins[bin_idx] += snr_linear
                 _target_meta[target.target_id] = (pr_dbm, one_way_gain_db)
+            
+            if self.config.snr < 1000.0:
+                noise_std = 10 ** (-self.config.snr / 20.0)
+                power_bins = np.clip(
+                    power_bins + np.random.normal(0, noise_std * float(np.max(power_bins) + 1e-30), power_bins.shape),
+                    0, None,
+                )
 
             cfar_thr = compute_cfar_threshold(power_bins, self._detection_cfg)
 
@@ -355,9 +365,6 @@ class RadarScenario(Scenario):
                     ang_sep = abs((target.bearing_deg - float(antenna_angle) + 180) % 360 - 180)
                     if ang_sep > self.hpbw_deg / 2.0:
                         continue
-
-                    fd          = 2.0 * target.velocity_m_s * self.carrier_freq_hz / _C
-                    doppler_m_s = fd * self.wavelength_m / 2.0
 
                     # Estimate range from bin index, not ground-truth position
                     estimated_range_m = bin_idx * self._waveform.range_resolution_m
@@ -380,12 +387,12 @@ class RadarScenario(Scenario):
                         angle_deg     = round(float(antenna_angle), 1),
                         snr_db        = round(snr_db_bin, 1),
                         estimated_rcs = round(estimated_rcs, 3),
-                        doppler_m_s   = round(doppler_m_s, 2),
                     ))
 
+            compressed = self._log_compress(power_bins, noise_floor_db=self.environment.noise_floor_dbm,)
             sweep_data.append({
                 "angle_deg":  float(antenna_angle),
-                "range_bins": self._log_compress(power_bins).tolist(),
+                "range_bins": self._downsample_bins(compressed).tolist(),
             })
 
         return RadarScanResult(
@@ -443,7 +450,6 @@ class RadarScenario(Scenario):
                 for offset in face_offsets
             ]
             results = [f.result() for f in futures]
-
         sweep_data: List[dict]           = []
         detections: List[RadarDetection] = []
         detected_ids: set                = set()
@@ -461,6 +467,157 @@ class RadarScenario(Scenario):
             sweep_data = sweep_data,
         )
     
+    def scan_focused(
+        self,
+        target_angle:   float,
+        max_range_m:    float = 150_000.0,
+        num_range_bins: int   = 128,
+    ) -> RadarScanResult:
+        """
+        AESA Search-and-Track focused sweep.
+
+        Scans a tight ±2° sector around `target_angle` at 0.5° steps using
+        maximum aperture (all elements, no apodization). Deliberately avoids
+        the 4-face ThreadPoolExecutor used by generate_ppi_scan — this method
+        is always called from an executor thread itself, so nesting thread
+        pools would deadlock the default pool under load.
+        """
+        original_enabled      = [el.enabled            for el in self.config.elements]
+        original_apod         = self.config.apodization_window
+        original_apod_weights = [el.apodization_weight  for el in self.config.elements]
+        original_steering     = self.config.steering_angle
+
+        try:
+            for el in self.config.elements:
+                el.enabled            = True
+                el.apodization_weight = 1.0
+            self.config.apodization_window = 'none'
+
+            start_angle = target_angle - 2.0
+            end_angle   = target_angle + 2.0
+            # 0.5° steps — fine enough for track refinement, 8× fewer lines than 0.1°
+            angles_deg  = np.arange(start_angle, end_angle + 0.5, 0.5)
+
+            ranges_m    = np.linspace(
+                self._waveform.range_resolution_m,
+                max_range_m,
+                num_range_bins,
+            )
+            bin_width_m = float(ranges_m[1] - ranges_m[0]) if num_range_bins > 1 else max_range_m
+
+            lam_db = 20.0 * math.log10(self.wavelength_m)
+            g0_db  = self.array_gain_db
+            pt_dbm = self._waveform.pt_dbm
+
+            sweep_data : List[dict]           = []
+            detections : List[RadarDetection] = []
+
+            for steer_angle in angles_deg:
+                global_steer = float(steer_angle) % 360.0
+
+                self.config.steering_angle = global_steer
+                self.config.calculate_steering_delays()
+
+                beam_result = self.config.compute_beamforming(
+                    num_samples           = 128,
+                    calculate_time_domain = False,
+                )
+
+                bp_db  = np.asarray(beam_result.beam_pattern_db)
+                bp_ang = np.asarray(beam_result.angles_deg)
+
+                power_bins = np.zeros(num_range_bins, dtype=float)
+
+                for target in self.environment.targets:
+                    r       = target.range_m
+                    bearing = target.bearing_deg
+
+                    if r > max_range_m or r < 1.0:
+                        continue
+
+                    rel_ang = (bearing - global_steer + 180.0) % 360.0 - 180.0
+                    rel_ang = max(-90.0, min(90.0, rel_ang))
+
+                    relative_gain_db = float(np.interp(rel_ang, bp_ang, bp_db))
+                    one_way_gain_db  = g0_db + relative_gain_db
+
+                    pr_dbm = (
+                        pt_dbm
+                        + 2.0 * one_way_gain_db
+                        + lam_db
+                        + target.rcs_db
+                        - _4PI3_DB
+                        - 40.0 * math.log10(max(r, 1.0))
+                    )
+
+                    snr_db     = pr_dbm - self.environment.noise_plus_clutter_dbm(r)
+                    snr_linear = 10.0 ** (snr_db / 10.0)
+
+                    bin_idx = int(np.argmin(np.abs(ranges_m - r)))
+                    power_bins[bin_idx] += snr_linear
+
+                cfar_thr = compute_cfar_threshold(power_bins, self._detection_cfg)
+
+                pr_dbm = self.environment.noise_floor_dbm
+                one_way_gain_db = g0_db
+
+                for bin_idx in range(num_range_bins):
+                    if power_bins[bin_idx] <= cfar_thr[bin_idx]:
+                        continue
+
+                    bin_range  = float(ranges_m[bin_idx])
+                    snr_db_bin = 10.0 * math.log10(max(power_bins[bin_idx], 1e-30))
+
+                    for target in self.environment.targets:
+                        if abs(target.range_m - bin_range) > bin_width_m:
+                            continue
+
+                        ang_sep = abs((target.bearing_deg - global_steer + 180) % 360 - 180)
+                        if ang_sep > self.hpbw_deg / 2.0:
+                            continue
+
+                        estimated_range_m = bin_idx * self._waveform.range_resolution_m
+
+                        pt_lin = 10.0 ** ((pt_dbm          - 30.0) / 10.0)
+                        pr_lin = 10.0 ** ((pr_dbm           - 30.0) / 10.0)
+                        g_lin  = 10.0 ** (one_way_gain_db   / 10.0)
+                        lam    = self.wavelength_m
+                        r4     = max(estimated_range_m, 1.0) ** 4
+                        estimated_rcs = (
+                            pr_lin * (4.0 * math.pi) ** 3 * r4
+                            / (pt_lin * g_lin ** 2 * lam ** 2)
+                        )
+
+                        detections.append(RadarDetection(
+                            target_id     = target.target_id,
+                            range_m       = round(estimated_range_m, 1),
+                            angle_deg     = round(global_steer, 1),
+                            snr_db        = round(snr_db_bin, 1),
+                            estimated_rcs = round(estimated_rcs, 3),
+                        ))
+
+                compressed = self._log_compress(power_bins, noise_floor_db=self.environment.noise_floor_dbm,)
+                sweep_data.append({
+                    "angle_deg":  global_steer,
+                    "range_bins": self._downsample_bins(compressed).tolist(),
+                })
+
+            return RadarScanResult(
+                timestamp  = 0.0,
+                detections = detections,
+                sweep_data = sweep_data,
+            )
+
+        finally:
+            for el, was_enabled, w in zip(
+                self.config.elements, original_enabled, original_apod_weights
+            ):
+                el.enabled            = was_enabled
+                el.apodization_weight = w
+            self.config.apodization_window = original_apod
+            self.config.steering_angle     = original_steering
+            self.config.calculate_steering_delays()
+
     def compute_beamforming_4face(self) -> "BeamformingResult":
         """
         Full 360° beam pattern via coherent complex superposition of 4 faces.
@@ -469,7 +626,7 @@ class RadarScenario(Scenario):
         """
         from Objects.ArrayConfig import BeamformingResult
 
-        angles_deg = np.linspace(0, 360, 3601, endpoint=False)
+        angles_deg = np.arange(0, 360, 1.0)
         angles_rad = np.deg2rad(angles_deg)
 
         active_els  = [el for el in self.config.elements if el.enabled]
@@ -616,10 +773,20 @@ class RadarScenario(Scenario):
                 snr_db     = pr_dbm - self.environment.noise_plus_clutter_dbm(r)
                 snr_linear = 10.0 ** (snr_db / 10.0)
 
+                if self.config.snr < 1000.0:
+                    noise_std = 10 ** (-self.config.snr / 20.0)
+                    power_bins = np.clip(
+                        power_bins + np.random.normal(0, noise_std * float(np.max(power_bins) + 1e-30), power_bins.shape),
+                        0, None,
+                    )
+
                 bin_idx = int(np.argmin(np.abs(ranges_m - r)))
                 power_bins[bin_idx] += snr_linear
 
             cfar_thr = compute_cfar_threshold(power_bins, self._detection_cfg)
+
+            pr_dbm = self.environment.noise_floor_dbm
+            one_way_gain_db = g0_db
 
             for bin_idx in range(num_range_bins):
                 if power_bins[bin_idx] <= cfar_thr[bin_idx]:
@@ -648,32 +815,45 @@ class RadarScenario(Scenario):
                         / (pt_lin * g_lin ** 2 * lam ** 2)
                     )
 
-                    fd          = 2.0 * target.velocity_m_s * self.carrier_freq_hz / _C
-                    doppler_m_s = fd * self.wavelength_m / 2.0
-
                     detections.append(RadarDetection(
                         target_id     = target.target_id,
                         range_m       = round(estimated_range_m, 1),
                         angle_deg     = round(global_steer, 1),
                         snr_db        = round(snr_db_bin, 1),
                         estimated_rcs = round(estimated_rcs, 3),
-                        doppler_m_s   = round(doppler_m_s, 2),
                     ))
 
+            compressed = self._log_compress(power_bins, noise_floor_db=self.environment.noise_floor_dbm,)
             sweep_data.append({
                 "angle_deg":  global_steer,
-                "range_bins": self._log_compress(power_bins).tolist(),
+                "range_bins": self._downsample_bins(compressed).tolist(),
             })
 
         return sweep_data, detections
 
     @staticmethod
     def _log_compress(
-        power_bins:       np.ndarray,
+        power_bins: np.ndarray,
         dynamic_range_db: float = 40.0,
+        noise_floor_db: float = -300.0,
     ) -> np.ndarray:
-        eps       = 1e-30
-        power_db  = 10.0 * np.log10(np.maximum(power_bins, eps))
-        peak_db   = float(np.max(power_db))
-        floor_db  = peak_db - dynamic_range_db
+        eps = 1e-30
+        safe = np.where(np.isfinite(power_bins), power_bins, eps)
+        power_db = 10.0 * np.log10(np.maximum(safe, eps))
+
+        # Use per-frame peak so only bins meaningfully above background survive
+        peak_db = float(np.max(power_db))
+        floor_db = peak_db - dynamic_range_db  # ← relative floor, not absolute
         return np.clip((power_db - floor_db) / dynamic_range_db, 0.0, 1.0)
+
+    @staticmethod
+    def _downsample_bins(bins: np.ndarray, max_bins: int = 300) -> np.ndarray:
+        """Average-pool `bins` down to at most `max_bins` points for transport."""
+        n = len(bins)
+        if n <= max_bins:
+            return bins
+        # Trim to a multiple of the pool size, then reshape and mean
+        factor = math.ceil(n / max_bins)
+        trim = factor * max_bins
+        padded = np.resize(bins, trim)   # repeats tail values to pad
+        return padded.reshape(max_bins, factor).mean(axis=1)

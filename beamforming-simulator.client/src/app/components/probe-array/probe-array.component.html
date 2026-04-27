@@ -20,7 +20,7 @@
     <!-- Panel tabs -->
     <div class="panel-tabs">
       <button
-        *ngFor="let tab of ['elements','geometry','beam']"
+        *ngFor="let tab of ['elements','geometry']"
         class="panel-tab"
         [class.active]="panelTab === tab"
         (click)="panelTab = $any(tab)"
@@ -103,7 +103,7 @@
             <span class="val">{{ arrayConfig.elementSpacing | number:'1.0-1' }} mm</span>
           </label>
           <input type="range" class="styled-slider"
-            min="1" max="30" step="0.5"
+            min="1" max="70" step="0.5"
             [(ngModel)]="arrayConfig.elementSpacing"
             (ngModelChange)="onGeometryChange()"
           />
@@ -123,36 +123,6 @@
         </div>
       </div>
 
-      <!-- Steering angle -->
-      <div class="ctrl-section">
-        <div class="section-label">Beam Steering</div>
-        <div class="ctrl-group">
-          <label class="ctrl-label">
-            Steering Angle
-            <span class="val">{{ arrayConfig.steeringAngle | number:'1.0-1' }}°</span>
-          </label>
-          <input type="range" class="styled-slider"
-            min="-60" max="60" step="0.5"
-            [(ngModel)]="arrayConfig.steeringAngle"
-            (ngModelChange)="onGeometryChange()"
-          />
-        </div>
-
-        <div class="ctrl-group">
-          <label class="ctrl-label">
-            Focus Depth
-            <span class="val">
-              {{ arrayConfig.focusDepth === 0 ? 'Plane' : (arrayConfig.focusDepth | number:'1.0-0') + ' mm' }}
-            </span>
-          </label>
-          <input type="range" class="styled-slider"
-            min="0" max="200" step="1"
-            [(ngModel)]="arrayConfig.focusDepth"
-            (ngModelChange)="onGeometryChange()"
-          />
-        </div>
-      </div>
-
       <!-- Geometry canvas -->
       <div class="geo-canvas-wrap">
         <canvas #geometryCanvas class="geo-canvas"></canvas>
@@ -161,63 +131,4 @@
     </div>
 
   </ng-container>
-
-  <!-- ══ TAB: BEAM ══════════════════════════════════════════════ -->
-  <ng-container *ngIf="panelTab === 'beam'">
-
-    <div class="beam-tab">
-
-      <!-- Geometry canvas shared via CSS – hide geometry-tab canvas when beam tab active -->
-      <div class="geo-canvas-wrap">
-        <canvas class="geo-canvas" style="pointer-events:none; opacity:0.7;"
-          [width]="320" [height]="180"
-          id="beam-tab-preview"
-        ></canvas>
-        <div class="beam-tab-canvas-note">Array preview – switch to Geometry tab to interact</div>
-      </div>
-
-      <!-- Compute button -->
-      <div class="beam-compute-row">
-        <button class="apply-btn" [disabled]="computing" (click)="computeBeam()">
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6">
-            <path d="M2 8h12M8 3l5 5-5 5" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          {{ computing ? 'Computing…' : 'Compute Beamforming' }}
-        </button>
-      </div>
-
-      <!-- Result metrics -->
-      <div class="beam-metrics" *ngIf="beamformResult">
-        <div class="metric-card">
-          <div class="metric-label">Beam Angle</div>
-          <div class="metric-value">{{ beamformResult.beamAngle | number:'1.1-1' }}°</div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-label">Main Lobe Width</div>
-          <div class="metric-value">{{ beamformResult.mainLobeWidth | number:'1.1-2' }}°</div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-label">Side Lobe Level</div>
-          <div class="metric-value">{{ beamformResult.sideLobeLevel | number:'1.1-1' }} dB</div>
-        </div>
-      </div>
-
-      <!-- Time-domain plot placeholder -->
-      <div class="beam-td-placeholder" *ngIf="beamformResult">
-        <div class="td-label">Combined Time-Domain Signal (IFFT)</div>
-        <div class="td-mini-chart">
-          <svg viewBox="0 0 300 60" preserveAspectRatio="none">
-            <polyline
-              [attr.points]="timeDomainPoints(beamformResult.timeDomain)"
-              fill="none" stroke="#1a73e8" stroke-width="1.2"
-              stroke-linejoin="round"
-            />
-          </svg>
-        </div>
-      </div>
-
-    </div>
-
-  </ng-container>
-
 </div>
