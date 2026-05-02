@@ -18,7 +18,7 @@
           [value]="steerSpeedDegPerBatch"
           (input)="steerSpeedDegPerBatch = +$any($event.target).value"
         />
-        <span class="ctrl-hint">Degrees swept per network round-trip — higher = faster rotation, coarser coverage</span>
+        <span class="ctrl-hint">Angular window sent per round-trip — higher = faster rotation, fewer dwell angles per batch</span>
       </div>
 
       <div class="ctrl-group">
@@ -158,19 +158,26 @@
               />
             </div>
 
-            <div *ngIf="tgt.lastDetection" style="margin-top: 3px">
-              <span class="tgt-meta">
+            <div style="margin-top: 3px; min-height: 14px;">
+              <span class="tgt-meta" *ngIf="tgt.lastDetection">
                 PA · SNR {{ tgt.lastDetection.snr_db | number: '1.0-0' }} dB ·
                 {{ tgt.lastDetection.range_m / 1000 | number: '1.0-0' }} km ·
                 {{ tgt.lastDetection.angle_deg | number: '1.0-0' }}°.
                 {{ tgt.lastDetection.estimated_rcs }} m²
               </span>
+              <span class="tgt-meta" *ngIf="!tgt.lastDetection">
+                PA · -
+              </span>
             </div>
-            <div *ngIf="tgt.trdLastDetection" style="margin-top: 2px">
-              <span class="tgt-meta" style="color: var(--accent-green)">
+
+            <div style="margin-top: 2px; min-height: 14px;">
+              <span class="tgt-meta" style="color: var(--accent-green)" *ngIf="tgt.trdLastDetection">
                 TRD · SNR {{ tgt.trdLastDetection.snr_db | number: '1.0-0' }} dB ·
                 {{ tgt.trdLastDetection.range_m / 1000 | number: '1.0-0' }} km
                 {{ tgt.trdLastDetection.estimated_rcs }} m²
+              </span>
+              <span class="tgt-meta" style="color: var(--accent-green)" *ngIf="!tgt.trdLastDetection">
+                TRD · -
               </span>
             </div>
           </div>
@@ -184,12 +191,10 @@
       <div class="section-label">Array Configuration</div>
 
       <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px">
-        <span class="const-badge">Geometry: 4-face Linear</span>
+        <span class="const-badge">Geometry: Linear (single array)</span>
         <span class="const-badge">Wave Speed: 300,000.0 mm/µs</span>
         <span class="const-badge">Focus: Plane Wave</span>
-        <span class="const-badge"
-          >TRD Rot: {{ TRD_ROT_DEG_PER_FRAME | number: '1.1-1' }} °/frame</span
-        >
+        <span class="const-badge">TRD: 0.5 °/line · 15 lines/batch</span>
       </div>
 
       <div class="ctrl-group">
@@ -221,7 +226,7 @@
           [value]="elementSpacing"
           (input)="elementSpacing = +$any($event.target).value; onHardwareChange()"
         />
-        <span class="ctrl-hint">↑ spacing = narrower beam</span>
+        <span class="ctrl-hint">↑ spacing → narrower beam, but >λ/2 risks grating lobes</span>
       </div>
 
       <div class="ctrl-group">
@@ -237,7 +242,7 @@
           [value]="frequencyGhz"
           (input)="frequencyGhz = +$any($event.target).value; onHardwareChange()"
         />
-        <span class="ctrl-hint">↑ frequency = narrower beam</span>
+        <span class="ctrl-hint">↑ frequency → narrower beam (shorter λ); also tightens λ/2 spacing</span>
       </div>
 
       <div class="ctrl-group">
@@ -256,7 +261,7 @@
 
       <div class="ctrl-group">
         <label class="ctrl-label"
-          >SNR <span class="val">{{ snr | number: '1.0-0' }} dB</span></label
+          >Sim Noise Level <span class="val">{{ snr | number: '1.0-0' }} dB</span></label
         >
         <input
           type="range"
@@ -267,6 +272,7 @@
           [value]="snr"
           (input)="snr = +$any($event.target).value; onHardwareChange()"
         />
+        <span class="ctrl-hint">Simulated receiver noise amplitude — 1000 = noiseless, 0 = very noisy</span>
       </div>
     </div>
 
@@ -557,7 +563,7 @@
         </div>
         <div class="radar-footer">
           <span class="footer-note">
-            Normalised dB gain vs angle · -3 dB / sidelobe markers from backend beamforming
+            Normalised dB gain vs bearing angle · –3 dB ring shown dashed · Red line = current steering
           </span>
         </div>
       </div>

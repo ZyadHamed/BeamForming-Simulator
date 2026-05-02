@@ -53,29 +53,88 @@ export interface RadarElementInput {
 }
 
 export interface RadarSetupRequest {
-  num_elements: number;
-  element_spacing: number;
-  frequency_mhz: number;
-  geometry: string;
-  curvature_radius: number;
-  steering_angle: number;
-  focus_depth: number;
-  snr: number;
-  apodization: string;
-  noise_floor_dbm: number;
-  wave_speed: number;
-  elements: RadarElementInput[];
-  // Waveform
-  pt_dbm: number;
-  prf_hz: number;
-  pulse_width_us: number;
-  // Environment
-  clutter_floor_dbm: number;
-  clutter_range_exp: number;
-  // Detector
-  cfar_guard_cells: number;
-  cfar_ref_cells: number;
-  cfar_pfa: number;
+  num_elements:      number;
+  element_spacing:   number;
+  frequency_mhz:     number;
+  geometry:          'linear' | 'curved' | 'phased';
+  curvature_radius?: number;
+  steering_angle?:   number;
+  focus_depth?:      number;
+  snr?:              number;
+  apodization?:      'none' | 'hanning' | 'hamming' | 'blackman' | 'kaiser' | 'tukey';
+  pt_dbm?:           number;
+  prf_hz?:           number;
+  pulse_width_us?:   number;
+  noise_floor_dbm?:  number;
+  clutter_floor_dbm?: number;
+  clutter_range_exp?: number;
+  cfar_guard_cells?: number;
+  cfar_ref_cells?:   number;
+  cfar_pfa?:         number;
+}
+
+export interface RadarInfoResponse {
+  num_elements:            number;
+  carrier_freq_hz:         number;
+  wavelength_m:            number;
+  array_gain_db:           number;
+  hpbw_deg:                number;
+  range_resolution_m:      number;
+  max_unambiguous_range_m: number;
+  pt_dbm:                  number;
+  prf_hz:                  number;
+  pulse_width_us:          number;
+  noise_floor_dbm:         number;
+  beam_pattern:    number[];
+  angles_deg:      number[];
+  beam_angle:      number;
+  main_lobe_width: number;
+  side_lobe_level: number | null;
+  interference_image: string;
+  interference_cols:  number;
+  interference_rows:  number;
+}
+
+export interface RadarScanRequest {
+  start_angle:    number;
+  end_angle:      number;
+  num_lines:      number;
+  max_range_m:    number;
+  num_range_bins: number;
+  targets:        { target_id: string; x_m: number; y_m: number; rcs_sqm: number; target_extent_m: number; }[];
+  radar_type:     'phased_array' | 'traditional';
+}
+
+export interface RadarDetection {
+  target_id:          string;
+  range_m:            number;
+  angle_deg:          number;
+  snr_db:             number;
+  estimated_rcs:      number;
+  estimated_extent_m: number;
+}
+
+export interface SweepLine {
+  angle_deg:  number;
+  range_bins: number[];
+}
+
+export interface BfScanPayload {
+  sweep_data:          SweepLine[];
+  detections:          RadarDetection[];
+  interference_image?: string;
+  interference_cols?:  number;
+  interference_rows?:  number;
+  beam_pattern?:       number[];
+  angles_deg?:         number[];
+  beam_angle?:         number;
+  main_lobe_width?:    number;
+  side_lobe_level?:    number | null;
+}
+
+export interface TrdScanPayload {
+  sweep_data:  SweepLine[];
+  detections:  RadarDetection[];
 }
 // ── 5G Interfaces ──────────────────────────────────────────────────
 export interface Tower5GRequest {
@@ -211,41 +270,33 @@ export class BeamformingService {
     return of(null as any);
   }
 
-  setupRadar(req: RadarSetupRequest): Observable<{ message: string }> {
-    return this.http.post<{ message: string }>(`${API_BASE}/radar/setup`, req);
+  setupRadar(req: RadarSetupRequest): Observable<RadarInfoResponse> {
+    return this.http.post<RadarInfoResponse>(`${API_BASE}/radar/setup`, req);
   }
 
 
 private bfSocket: WebSocket | null = null;
 private trdSocket: WebSocket | null = null;
-private bfScanResult$ = new Subject<{
-  sweep_data: any[];
-  detections: any[];
-  interference_image?: string;
-  interference_cols?: number;
-  interference_rows?: number;
-  beam_pattern?: number[];
-  angles_deg?: number[];
-  beam_angle?: number;
-  main_lobe_width?: number;
-  side_lobe_level?: number | null;
-}>();
-private trdScanResult$ = new Subject<{ sweep_data: any[]; detections: any[] }>();
+private bfScanResult$  = new Subject<BfScanPayload>();
+private trdScanResult$ = new Subject<TrdScanPayload>();
 
 // ADD this method — call once on component init to open sockets:
 openScanSockets(): void {
   this.closeScanSockets();
 
   this.bfSocket = new WebSocket(`${WS_BASE}/radar/scan`);
+  this.bfSocket.onopen    = () => this.bfSocket!.send('READY');
   this.bfSocket.onmessage = (ev) => {
-    try { this.bfScanResult$.next(JSON.parse(ev.data)); } catch {}
+    try { this.bfScanResult$.next(JSON.parse(ev.data) as BfScanPayload); } catch {}
   };
+  this.bfSocket.onerror = (err) => console.error('[BF socket]', err);
 
-  // Traditional socket (second independent connection)
   this.trdSocket = new WebSocket(`${WS_BASE}/radar/scan`);
+  this.trdSocket.onopen    = () => this.trdSocket!.send('READY');
   this.trdSocket.onmessage = (ev) => {
-    try { this.trdScanResult$.next(JSON.parse(ev.data)); } catch {}
+    try { this.trdScanResult$.next(JSON.parse(ev.data) as TrdScanPayload); } catch {}
   };
+  this.trdSocket.onerror = (err) => console.error('[TRD socket]', err);
 }
 
 // ADD this method — call on component destroy:
@@ -257,13 +308,13 @@ closeScanSockets(): void {
 }
 
 // these two methods — push a scan slice and receive the result stream:
-sendBfScanSlice(req: object): void {
+sendBfScanSlice(req: Omit<RadarScanRequest, 'radar_type'>): void {
   if (this.bfSocket?.readyState === WebSocket.OPEN) {
     this.bfSocket.send(JSON.stringify({ ...req, radar_type: 'phased_array' }));
   }
 }
 
-sendTrdScanSlice(req: object): void {
+sendTrdScanSlice(req: Omit<RadarScanRequest, 'radar_type'>): void {
   if (this.trdSocket?.readyState === WebSocket.OPEN) {
     this.trdSocket.send(JSON.stringify({ ...req, radar_type: 'traditional' }));
   }
@@ -281,22 +332,11 @@ sendTrdReady(): void {
   }
 }
 
-get bfScanResults$(): Observable<{
-  sweep_data: any[];
-  detections: any[];
-  interference_image?: string;
-  interference_cols?: number;
-  interference_rows?: number;
-  beam_pattern?: number[];
-  angles_deg?: number[];
-  beam_angle?: number;
-  main_lobe_width?: number;
-  side_lobe_level?: number | null;
-}> {
+get bfScanResults$(): Observable<BfScanPayload> {
   return this.bfScanResult$.asObservable();
 }
 
-get trdScanResults$(): Observable<{ sweep_data: any[]; detections: any[] }> {
+get trdScanResults$(): Observable<TrdScanPayload> {
   return this.trdScanResult$.asObservable();
 }
 
