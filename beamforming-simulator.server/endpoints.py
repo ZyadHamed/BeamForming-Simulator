@@ -775,7 +775,6 @@ def _compute_sector_pattern(sector, local_angles_deg: list):
 
 # --- Radar State ---
 active_radar: Optional[RadarScenario] = None
-INTERFERENCE_UPDATE_INTERVAL_DEG = 15.0
 _radar_lock = asyncio.Lock()  
 
 # --- Radar DTOs ---
@@ -808,10 +807,11 @@ class RadarSetupRequest(BaseModel):
     cfar_pfa         : float  = 1e-4
 
 class RadarTargetDTO(BaseModel):
-    target_id  : str
-    x_m        : float
-    y_m        : float
-    rcs_sqm    : float
+    target_id        : str
+    x_m              : float
+    y_m              : float
+    rcs_sqm          : float
+    target_extent_m  : float = 0.0   # pass through to RadarTarget
 
 class RadarScanRequest(BaseModel):
     start_angle    : float
@@ -897,7 +897,7 @@ def _build_array_config(req: RadarSetupRequest) -> ArrayConfig:
         apodization_window = req.apodization,
         kaiser_beta        = 14.0,
         tukey_alpha        = 0.5,
-        wave_speed         = 300_000.0,
+        wave_speed         = 299_792_458.0 * 1e-3,   # mm/µs
     )
     # Apply apodization only when elements weren't supplied with explicit weights
     if not req.elements:
@@ -906,7 +906,7 @@ def _build_array_config(req: RadarSetupRequest) -> ArrayConfig:
     return config
 
 # REPLACE _compute_and_send_interference (lines 295–319) WITH:
-def _compute_interference_only(radar) -> dict:
+def _compute_interference_only(radar, steering_angle: float = 0.0) -> dict:
     """CPU-bound interference + beamforming computation. No I/O. Returns a plain dict."""
     try:
         n_el     = len([e for e in radar.config.elements if e.enabled])
@@ -915,11 +915,12 @@ def _compute_interference_only(radar) -> dict:
         res_mm   = width_mm / 250.0
 
         interference = radar.compute_interference_field(
-            width_mm      = width_mm,
-            depth_mm      = width_mm,
-            resolution_mm = res_mm,
+            width_mm       = width_mm,
+            depth_mm       = width_mm,
+            resolution_mm  = res_mm,
+            steering_angle = steering_angle,
         )
-        bf_result = radar.compute_beamforming_4face()
+        bf_result = radar.compute_beamforming_4face(steering_angle=steering_angle)
 
         return {
             "interference_image": interference.image_base64,
@@ -1049,6 +1050,7 @@ async def ws_radar_scan(websocket: WebSocket):
                         x_m          = t.x_m,
                         y_m          = t.y_m,
                         rcs_sqm      = t.rcs_sqm,
+                        target_extent_m = t.target_extent_m,
                     ) for t in req.targets
                 ]
                 if req.radar_type == 'traditional':
@@ -1061,8 +1063,6 @@ async def ws_radar_scan(websocket: WebSocket):
                     )
                 else:
                     result = active_radar.generate_ppi_scan(
-                        start_angle    = req.start_angle,
-                        end_angle      = req.end_angle,
                         num_lines      = req.num_lines,
                         max_range_m    = req.max_range_m,
                         num_range_bins = req.num_range_bins,
@@ -1075,13 +1075,12 @@ async def ws_radar_scan(websocket: WebSocket):
                 "detections": [vars(d) for d in result.detections],
             }
 
-            # ── Interference field (every N frames, non-blocking) ──────────
-            swept_deg = req.end_angle - req.start_angle
-            interval  = max(1.0, INTERFERENCE_UPDATE_INTERVAL_DEG)
-            if swept_deg > 0 and (req.end_angle % interval) < swept_deg and req.radar_type == 'phased_array':
+            # ── Interference field (every frame for phased array, non-blocking) ──
+            if req.radar_type == 'phased_array':
+                mid_angle = (req.start_angle + req.end_angle) / 2.0 % 360.0
                 loop = asyncio.get_event_loop()
                 interference_result = await loop.run_in_executor(
-                    None, _compute_interference_only, active_radar
+                    None, _compute_interference_only, active_radar, mid_angle
                 )
                 if interference_result:
                     payload.update(interference_result)
