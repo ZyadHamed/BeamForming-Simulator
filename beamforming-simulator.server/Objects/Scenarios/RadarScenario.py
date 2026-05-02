@@ -370,7 +370,7 @@ class RadarScenario(Scenario):
                     estimated_range_m = bin_idx * self._waveform.range_resolution_m
 
                     # Invert the radar equation to estimate RCS from received power
-                    pr_dbm_t, g1w_db = _target_meta.get(target.target_id, (pr_dbm, one_way_gain_db))
+                    # pr_dbm_t, g1w_db = _target_meta.get(target.target_id, (pr_dbm, one_way_gain_db))
                     pt_lin   = 10.0 ** ((pt_dbm  - 30.0) / 10.0)   # dBm → W
                     pr_lin   = 10.0 ** ((pr_dbm   - 30.0) / 10.0)   # dBm → W
                     g_lin    = 10.0 ** (one_way_gain_db / 10.0)

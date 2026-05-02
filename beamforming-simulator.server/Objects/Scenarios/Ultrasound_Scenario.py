@@ -96,7 +96,11 @@ class UltrasoundScenario(Scenario):
             if not el.enabled:
                 continue
             # np.interp is still called, but the math leading up to it is now instantly computed in C
-            aligned_signal = np.interp(times_of_flight[i], time_vector, channel_data[i])
+            aligned_signal = np.where(
+                (times_of_flight[i] >= time_vector[0]) & (times_of_flight[i] <= time_vector[-1]),
+                np.interp(times_of_flight[i], time_vector, channel_data[i]),
+                0.0  # Don't clamp — return zero for out-of-bounds
+            )
             summed_rf_signal += aligned_signal * el.apodization_weight
 
         return summed_rf_signal, depths_mm
@@ -104,6 +108,8 @@ class UltrasoundScenario(Scenario):
     def generate_a_mode(self, angle_deg: float, max_depth_mm: float) -> AModeResult:
         """Generates standard amplitude envelopes for structural imaging."""
         summed_rf_signal, depths_mm = self._beamform_raw_rf(angle_deg, max_depth_mm)
+
+        summed_rf_signal = summed_rf_signal - np.mean(summed_rf_signal)
 
         analytic_signal = hilbert(summed_rf_signal)
         envelope = np.abs(analytic_signal)
