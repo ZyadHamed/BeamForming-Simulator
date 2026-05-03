@@ -139,6 +139,9 @@ export class ModeUltrasoundComponent implements OnInit, OnDestroy {
   cursorX = 0;
 cursorZ = 0;
 
+private lastProbeAngleAtScan = 0;
+
+
   /* ── shared probe spec ──────────────────────────────────────── */
   probe: ProbeSpec = {
     num_elements: 32, pitch_mm: .2, frequency_mhz: 5,
@@ -264,6 +267,7 @@ runScan() {
   private runBMode() {
     if (!this.scenarioReady) { this.errMsg = 'Create scenario first'; this.cdr.markForCheck(); return; }
     this.setLoading('B-mode sweep…');
+    this.lastProbeAngleAtScan = this.probeAngle;
     this.http.post<BModeRes>(`${this.api}/scan/bmode`, {
       session_id:   this.sessionId,
       start_angle:  this.probeAngle + this.bStart,
@@ -711,8 +715,27 @@ for (let x = -SCALE/2; x <= SCALE/2; x += 10) {
     if (!d.image_grid.length || !d.image_grid[0].length) return;
     const nL = d.image_grid.length, nD = d.image_grid[0].length;
     const angles = d.sector_angles_deg, depths = d.axial_depths_mm;
+    
     const maxDep = depths[depths.length - 1] || 80;
-    const ox = W/2, oy = 25, maxR = H - 45, sc = maxR / maxDep;
+    const aMinR = angles[0] * Math.PI / 180;
+    const aMaxR = angles[angles.length - 1] * Math.PI / 180;
+
+    // Fit scale so fan doesn't overflow vertically
+    const sc = (H - 60) / maxDep;
+
+    // The probe's lateral offset from phantom center in mm
+    const probePos = this.probePos();  // gives {x, z} in phantom mm space
+
+    // Fan extents at max depth in mm (relative to probe origin)
+    const fanLeftX  = maxDep * Math.sin(aMinR);  // negative
+    const fanRightX = maxDep * Math.sin(aMaxR);  // positive
+    const fanMaxZ   = maxDep;
+
+    // Place ox so the full fan is horizontally centered in the canvas
+    // The fan spans from fanLeftX to fanRightX relative to probe
+    const fanWidthPx = (fanRightX - fanLeftX) * sc;
+    const ox = (W - fanWidthPx) / 2 - fanLeftX * sc;
+    const oy = 25;
 
     for (let li = 0; li < nL - 1; li++) {
       const a1 = angles[li]*Math.PI/180, a2 = angles[li+1]*Math.PI/180;
@@ -734,14 +757,13 @@ for (let x = -SCALE/2; x <= SCALE/2; x += 10) {
     }
 
     ctx.strokeStyle = 'rgba(100,140,200,.2)'; ctx.lineWidth = .5; ctx.setLineDash([2,4]);
-    const aMin = angles[0]*Math.PI/180, aMax = angles[nL-1]*Math.PI/180;
     for (let dd = 10; dd <= maxDep; dd += 10) {
       const r = dd*sc;
       ctx.beginPath();
-      for (let a = aMin; a <= aMax; a += .02) { const px = ox+r*Math.sin(a), py = oy+r*Math.cos(a); a===aMin?ctx.moveTo(px,py):ctx.lineTo(px,py); }
+      for (let a = aMinR; a <= aMaxR; a += .02) { const px = ox+r*Math.sin(a), py = oy+r*Math.cos(a); a===aMinR?ctx.moveTo(px,py):ctx.lineTo(px,py); }
       ctx.stroke();
       ctx.fillStyle = 'rgba(100,140,200,.4)'; ctx.font = '8px IBM Plex Mono,monospace'; ctx.textAlign = 'left';
-      ctx.fillText(`${dd}`, ox+r*Math.sin(aMax)+4, oy+r*Math.cos(aMax));
+      ctx.fillText(`${dd}`, ox+r*Math.sin(aMaxR)+4, oy+r*Math.cos(aMaxR));
     }
     ctx.setLineDash([]);
     ctx.fillStyle = 'rgba(100,180,255,.7)'; ctx.font = 'bold 11px IBM Plex Mono,monospace'; ctx.textAlign = 'left';

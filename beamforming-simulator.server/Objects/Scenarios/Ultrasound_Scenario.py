@@ -135,6 +135,7 @@ class UltrasoundScenario(Scenario):
         image_db = 20.0 * np.log10((image_matrix / max_env) + 1e-9)
         dynamic_range = 50.0
         pixel_intensities = np.clip(image_db + dynamic_range, 0, dynamic_range)
+        pixel_intensities = pixel_intensities / dynamic_range 
 
         return BModeResult(
             sector_angles_deg=sector_angles.tolist(),
