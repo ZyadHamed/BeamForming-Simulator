@@ -198,6 +198,7 @@ cursorZ = 0;
   }
 
   createCustomScenario() {
+    console.log("CREATING custom scenario");
     this.setLoading('Recreating with edited regions…');
     this.scenarioReady = false;
     this.sessionId = 'us_' + Math.random().toString(36).slice(2, 8);
