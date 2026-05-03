@@ -261,31 +261,30 @@ kbd {
 }
 
 /* ── Coverage range slider ───────────────────────────────────────── */
-.coverage-panel {
+.coverage-slider-panel {
   flex-shrink: 0;
   border-bottom: 1px solid var(--border-light);
-  padding-bottom: 10px;
 }
 
-.range-row {
+.coverage-slider-wrap {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 12px 0;
+  padding: 4px 12px 10px;
 }
 
-.range-slider {
+.coverage-slider {
   flex: 1;
   -webkit-appearance: none;
   appearance: none;
   height: 4px;
   border-radius: 2px;
-  background: linear-gradient( to right, var(--accent-blue) 0%, var(--accent-blue) calc((var(--val, 50) - 60) / (500 - 60) * 100%), var(--border) calc((var(--val, 50) - 60) / (500 - 60) * 100%), var(--border) 100% );
-  cursor: pointer;
+  background: var(--border);
   accent-color: var(--accent-blue);
+  cursor: pointer;
 }
 
-  .range-slider::-webkit-slider-thumb {
+  .coverage-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
     width: 14px;
     height: 14px;
@@ -296,27 +295,63 @@ kbd {
     cursor: grab;
   }
 
-    .range-slider::-webkit-slider-thumb:active {
+    .coverage-slider::-webkit-slider-thumb:active {
       cursor: grabbing;
     }
 
-.range-value {
+.coverage-value {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   color: var(--accent-blue);
-  white-space: nowrap;
-  min-width: 44px;
+  min-width: 48px;
   text-align: right;
+  flex-shrink: 0;
 }
 
-.range-hint {
+/* ── Apodization + SNR panel ─────────────────────────────────────── */
+.apod-snr-panel {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.apod-snr-body {
+  padding: 4px 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ctrl-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ctrl-label {
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--text-muted);
-  padding: 2px 12px 0;
-  text-align: right;
+  min-width: 72px;
+  flex-shrink: 0;
 }
+
+.ctrl-select {
+  flex: 1;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+  .ctrl-select:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+  }
 
 /* ── Tower array panel ───────────────────────────────────────────── */
 .tower-array-panel {
@@ -370,6 +405,26 @@ kbd {
   flex-direction: column;
 }
 
+/* ── Beam source badge ───────────────────────────────────────────── */
+.beam-source-badge {
+  margin: 6px 10px 2px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  display: inline-block;
+  background: rgba(150,150,150,0.12);
+  color: var(--text-muted);
+  align-self: flex-start;
+}
+
+  .beam-source-badge.backend {
+    background: rgba(26,115,232,0.1);
+    color: var(--accent-blue);
+  }
+
+/* ── Sector tabs ─────────────────────────────────────────────────── */
 .sector-tabs {
   display: flex;
   gap: 4px;
@@ -407,6 +462,7 @@ kbd {
     box-shadow: 0 2px 6px color-mix(in srgb, var(--tab-color, #1a73e8) 40%, transparent);
   }
 
+/* ── Polar canvas ────────────────────────────────────────────────── */
 .polar-wrap {
   display: flex;
   flex-direction: column;
@@ -435,6 +491,7 @@ kbd {
   font-family: var(--font-mono);
 }
 
+/* ── Sector parameters table ─────────────────────────────────────── */
 .sector-params-wrap {
   padding: 4px 10px 12px;
   flex-shrink: 0;
@@ -494,38 +551,10 @@ kbd {
   display: block;
   width: 100%;
   height: 100%;
-  cursor: default;
 }
 
   .env-canvas.placing {
     cursor: crosshair;
-  }
-
-/* ── Drag hint ───────────────────────────────────────────────────── */
-.drag-hint {
-  position: absolute;
-  bottom: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  background: rgba(255,255,255,0.88);
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  padding: 5px 12px;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--text-muted);
-  pointer-events: none;
-  box-shadow: var(--shadow-sm);
-  white-space: nowrap;
-}
-
-  .drag-hint svg {
-    width: 12px;
-    height: 12px;
-    flex-shrink: 0;
   }
 
 /* ── Overlay legend ──────────────────────────────────────────────── */
@@ -559,32 +588,32 @@ kbd {
   border-radius: 50%;
   flex-shrink: 0;
 }
-
-/* ── Coverage range slider ───────────────────────────────────────── */
-.coverage-slider-panel {
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--border-light);
+.live-beam-panel {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  background: rgba(255,255,255,0.93);
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 8px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.12);
+  z-index: 10;
 }
 
-.coverage-slider-wrap {
+.live-beam-canvas {
+  display: block;
+}
+
+.live-beam-stats {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 12px 10px;
+  gap: 10px;
+  font: 9px 'IBM Plex Mono', monospace;
+  color: #555;
+  justify-content: center;
+  margin-top: 4px;
 }
 
-.coverage-slider {
-  flex: 1;
-  accent-color: var(--accent-blue);
-  cursor: pointer;
-  height: 4px;
-}
-
-.coverage-value {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--accent-blue);
-  min-width: 42px;
-  text-align: right;
+/* Make env-wrap position:relative so the panel anchors to it */
+.env-wrap {
+  position: relative;
 }

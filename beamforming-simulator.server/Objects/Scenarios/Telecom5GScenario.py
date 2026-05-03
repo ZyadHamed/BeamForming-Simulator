@@ -2,12 +2,14 @@ from dataclasses import dataclass
 from typing import List
 from Objects.ArrayConfig import ArrayConfig, ProbeElement
 from Objects.Scenarios.Scenario import Scenario
+
 @dataclass
 class UserEquipment:
     user_id: str
-    x_m: float  
-    y_m: float  
-    allocated_frequency_mhz: float 
+    x_m: float
+    y_m: float
+    allocated_frequency_mhz: float
+    current_tower_id: str | None = None  # ADD THIS
 
 @dataclass
 class LinkQuality:
@@ -47,8 +49,8 @@ class Tower5G:
         # Build 3 separate arrays, perfectly mimicking a real triangular cell tower
         # Alpha faces North (0°), Beta faces South-East (120°), Gamma faces South-West (-120°)
         self.sectors = [
-            TowerSector("Alpha", 0.0, self._build_array(num_elements, element_spacing_mm)),
-            TowerSector("Beta", 120.0, self._build_array(num_elements, element_spacing_mm)),
+            TowerSector("Alpha",  0.0,   self._build_array(num_elements, element_spacing_mm)),
+            TowerSector("Beta",   120.0, self._build_array(num_elements, element_spacing_mm)),
             TowerSector("Gamma", -120.0, self._build_array(num_elements, element_spacing_mm))
         ]
 
@@ -67,12 +69,39 @@ class Tower5G:
             num_elements=num_elements, snr=100.0, apodization_window='hamming',
             wave_speed=300000.0  # Speed of light
         )
-    
+
+
 from dataclasses import dataclass
 from typing import List, Dict, Tuple
 import math
 import time
 import numpy as np
+
+
+def _apply_apodization(num_elements: int, window_name: str, kaiser_beta: float = 6.0) -> np.ndarray:
+    """Returns normalised apodization weights for the given window type."""
+    w = window_name.lower().strip()
+    if w == 'hamming':
+        win = np.hamming(num_elements)
+    elif w == 'hanning':
+        win = np.hanning(num_elements)
+    elif w == 'blackman':
+        win = np.blackman(num_elements)
+    elif w == 'kaiser':
+        win = np.kaiser(num_elements, kaiser_beta)
+    elif w == 'tukey':
+        try:
+            from scipy.signal import windows as sig_win
+            win = sig_win.tukey(num_elements, alpha=0.5)
+        except ImportError:
+            win = np.ones(num_elements)
+    else:  # 'none' or unknown
+        win = np.ones(num_elements)
+    # Normalise so max weight = 1  (preserves peak gain direction)
+    peak = win.max()
+    return win / peak if peak > 0 else win
+
+
 class Telecom5GScenario:
     def __init__(self, towers: List[Tower5G], users: List[UserEquipment]):
         self.towers = towers
@@ -82,73 +111,111 @@ class Telecom5GScenario:
         self.channel_bandwidth_mhz = 100.0  
 
     def assign_users_to_sectors(self):
-        """Assigns users to the closest tower, and then to the correct array panel."""
-        # Structure: assignments[Tower][Sector] = [(User, Distance, Global_Angle, Local_Angle)]
         assignments = {t: {s: [] for s in t.sectors} for t in self.towers}
         dropped_users = []
 
         for user in self.users:
-            # 1. Find Closest Tower
-            closest_tower = None
-            min_dist = float('inf')
-            for tower in self.towers:
-                dist = math.sqrt((user.x_m - tower.x_m)**2 + (user.y_m - tower.y_m)**2)
-                if dist < min_dist and dist <= tower.max_coverage_radius_m:
-                    min_dist = dist
-                    closest_tower = tower
-            
-            if not closest_tower:
+            dx_list = [(t, math.sqrt((user.x_m - t.x_m)**2 + (user.y_m - t.y_m)**2))
+                    for t in self.towers]
+
+            # ── Sticky logic ──────────────────────────────────────────
+            # If the user has a current tower, check if they're still in range of it.
+            # If yes, lock them to it regardless of whether a closer tower exists.
+            assigned_tower = None
+            if user.current_tower_id:
+                current_tower = next((t for t in self.towers if t.tower_id == user.current_tower_id), None)
+                if current_tower:
+                    dist_to_current = math.sqrt(
+                        (user.x_m - current_tower.x_m)**2 + (user.y_m - current_tower.y_m)**2
+                    )
+                    if dist_to_current <= current_tower.max_coverage_radius_m:
+                        assigned_tower = current_tower  # sticky — stay put
+
+            # ── Normal assignment (new user or current tower lost) ────
+            if not assigned_tower:
+                min_dist = float('inf')
+                for tower, dist in dx_list:
+                    if dist < min_dist and dist <= tower.max_coverage_radius_m:
+                        min_dist = dist
+                        assigned_tower = tower
+
+            if not assigned_tower:
                 dropped_users.append(user.user_id)
                 continue
-                
-            # 2. Find Correct Sector (Alpha, Beta, or Gamma)
-            dx = user.x_m - closest_tower.x_m
-            dy = user.y_m - closest_tower.y_m
+
+            # ── Sector selection (unchanged) ──────────────────────────
+            dx = user.x_m - assigned_tower.x_m
+            dy = user.y_m - assigned_tower.y_m
             global_angle = math.degrees(math.atan2(dx, dy))
-            
+
             best_sector = None
             min_angle_diff = float('inf')
             local_angle = 0.0
-            
-            for sector in closest_tower.sectors:
-                # Wrap the angular difference to be between -180 and +180
+
+            for sector in assigned_tower.sectors:
                 diff = (global_angle - sector.boresight_angle_deg + 180) % 360 - 180
                 if abs(diff) < min_angle_diff:
                     min_angle_diff = abs(diff)
                     best_sector = sector
                     local_angle = diff
-                    
-            assignments[closest_tower][best_sector].append((user, min_dist, global_angle, local_angle))
+
+            assignments[assigned_tower][best_sector].append(
+                (user, math.sqrt((user.x_m - assigned_tower.x_m)**2 + (user.y_m - assigned_tower.y_m)**2),
+                global_angle, local_angle)
+            )
 
         return assignments, dropped_users
-
+    
+    
     def compute_superimposed_beam_pattern(self, sector: TowerSector, local_angles_deg: List[float]):
-        """Calculates MU-MIMO wave interference for a SINGLE sector panel."""
-        if not local_angles_deg:
-            return np.linspace(-90, 90, 181), np.full(181, -100.0)
+        """
+        Calculates MU-MIMO beam pattern for a SINGLE sector panel.
 
+        FIX: when local_angles_deg is empty (no users in this sector) we now
+        return a proper broadside pattern instead of a flat -100 dB array so
+        the polar plot always shows a meaningful beam shape.
+        Apodization from sector.array_config.apodization_window is applied in
+        BOTH the user-steered and the broadside cases.
+        """
         c, f = 300000.0, 3500.0
         k = 2 * np.pi / (c / f)
-        
+
         num_elements = sector.array_config.num_elements
         pitch = sector.array_config.element_spacing
         x_positions = (np.arange(num_elements) - (num_elements - 1) / 2.0) * pitch
-        
-        complex_weights = np.zeros(num_elements, dtype=complex)
-        for angle in local_angles_deg:
-            theta_rad = np.radians(angle)
-            complex_weights += np.exp(1j * k * x_positions * np.sin(theta_rad))
-            
-        complex_weights /= len(local_angles_deg)
-            
+
+        # Apodization weights (applied regardless of whether users exist)
+        apod_weights = _apply_apodization(
+            num_elements,
+            sector.array_config.apodization_window,
+        )
+
         scan_angles = np.linspace(-90, 90, 181)
-        scan_rads = np.radians(scan_angles)
+        scan_rads   = np.radians(scan_angles)
+
+        if not local_angles_deg:
+            # ── No users: return broadside pattern with apodization applied ──
+            # Broadside → steering vector is all-ones in phase
+            complex_weights = apod_weights.astype(complex)
+        else:
+            # ── Normal MU-MIMO: superimpose steering vectors for every user ──
+            complex_weights = np.zeros(num_elements, dtype=complex)
+            for angle in local_angles_deg:
+                theta_rad = np.radians(angle)
+                complex_weights += np.exp(1j * k * x_positions * np.sin(theta_rad))
+            complex_weights /= len(local_angles_deg)
+            # Apply apodization on top of the MU-MIMO weights
+            complex_weights *= apod_weights
+
         steering_matrix = np.exp(-1j * k * np.outer(x_positions, np.sin(scan_rads)))
-        
+
         amplitudes = np.abs(complex_weights @ steering_matrix)
-        amplitudes = np.maximum(amplitudes, 1e-10)
-        beam_pattern_db = 20 * np.log10(amplitudes)
-        
+        amplitudes  = np.maximum(amplitudes, 1e-10)
+
+        # Normalise to 0 dB peak so the pattern is always visible
+        amplitudes_norm  = amplitudes / amplitudes.max()
+        beam_pattern_db  = 20 * np.log10(amplitudes_norm)
+
         return scan_angles, beam_pattern_db
 
     def evaluate_network_links(self) -> NetworkStateResult:
@@ -170,15 +237,18 @@ class Telecom5GScenario:
                     antenna_gain_db = beam_pattern_db[idx]
 
                     # Free Space Path Loss (FSPL)
-                    freq_hz = user.allocated_frequency_mhz * 1e6
-                    fspl_db = 20.0 * math.log10(distance_m) + 20.0 * math.log10(freq_hz) - 147.55
+                    freq_hz  = user.allocated_frequency_mhz * 1e6
+                    fspl_db  = 20.0 * math.log10(distance_m) + 20.0 * math.log10(freq_hz) - 147.55
 
                     rx_power_dbm = self.tx_power_dbm + antenna_gain_db - fspl_db
-                    snr_db = rx_power_dbm - self.noise_floor_dbm
 
-                    snr_linear = 10.0 ** (snr_db / 10.0)
+                    # Apply configurable SNR offset from tower array config
+                    snr_offset_db = sector.array_config.snr - 100.0   # baseline is 100 dB
+                    snr_db = rx_power_dbm - self.noise_floor_dbm + snr_offset_db
+
+                    snr_linear    = 10.0 ** (snr_db / 10.0)
                     data_rate_mbps = self.channel_bandwidth_mhz * math.log2(1.0 + snr_linear) if snr_linear > 0 else 0.0
-                    data_rate_mbps = min(data_rate_mbps, 2000.0) 
+                    data_rate_mbps = min(data_rate_mbps, 2000.0)
 
                     active_connections.append(LinkQuality(
                         user_id=user.user_id, tower_id=tower.tower_id, sector_name=sector.name,

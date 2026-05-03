@@ -1,3 +1,11 @@
 beamforming-simulator.server/Services/__pycache__/MixerService.cpython-314.pyc
 /beamforming-simulator.server/Services/__pycache__
 beamforming-simulator.rar
+*.pyc
+beamforming-simulator.server/__pycache__/endpoints.cpython-313.pyc
+beamforming-simulator.server/Objects/__pycache__/ArrayConfig.cpython-313.pyc
+beamforming-simulator.server/Objects/Physics/__pycache__/RadarEnviroment.cpython-313.pyc
+beamforming-simulator.server/Objects/Physics/__pycache__/TargetEnviroment.cpython-313.pyc
+beamforming-simulator.server/Objects/Scenarios/__pycache__/RadarScenario.cpython-313.pyc
+beamforming-simulator.server/Objects/Scenarios/__pycache__/Scenario.cpython-313.pyc
+beamforming-simulator.server/Objects/Scenarios/__pycache__/Telecom5GScenario.cpython-313.pyc
