@@ -209,6 +209,20 @@
         </div>
       </div>
     </div>
+    <!-- Live beam panel — shown when a UE is selected -->
+<div class="live-beam-panel" *ngIf="liveBeamTower && liveBeamUser">
+  <div class="section-label">
+    Live Beam — {{ liveBeamUser.label }}
+    → BS{{ towers.indexOf(liveBeamTower)+1 }}
+    ({{ liveBeamUser.sector_name }})
+  </div>
+  <canvas #liveBeamCanvas width="200" height="200" class="live-beam-canvas"></canvas>
+  <div class="live-beam-stats">
+    <span>SNR {{ liveBeamUser.snr_db.toFixed(1) }} dB</span>
+    <span>{{ liveBeamUser.data_rate_mbps.toFixed(0) }} Mbps</span>
+    <span>θ = {{ liveBeamUser.local_beam_angle.toFixed(1) }}°</span>
+  </div>
+</div>
   </main>
 
 </div>

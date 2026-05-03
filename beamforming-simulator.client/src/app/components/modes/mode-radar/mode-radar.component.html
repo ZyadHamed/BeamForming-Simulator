@@ -1,22 +1,24 @@
 <div class="mode-layout">
   <aside class="mode-sidebar">
+    <!-- ── Scan Parameters ──────────────────────────────────────────── -->
     <div class="ctrl-section">
       <div class="section-label">Scan Parameters</div>
 
       <div class="ctrl-group">
         <label class="ctrl-label">
-          Scan Speed
-          <span class="val">{{ scanSpeed | number: '1.1-1' }} °/frame</span>
+          PA Steer Speed
+          <span class="val">{{ steerSpeedDegPerBatch | number: '1.0-0' }} °/batch</span>
         </label>
         <input
           type="range"
           class="styled-slider"
-          min="0.2"
-          max="5"
-          step="0.1"
-          [value]="scanSpeed"
-          (input)="scanSpeed = +$any($event.target).value"
+          min="1"
+          max="45"
+          step="1"
+          [value]="steerSpeedDegPerBatch"
+          (input)="steerSpeedDegPerBatch = +$any($event.target).value"
         />
+        <span class="ctrl-hint">Angular window sent per round-trip — higher = faster rotation, fewer dwell angles per batch</span>
       </div>
 
       <div class="ctrl-group">
@@ -35,62 +37,16 @@
         />
       </div>
 
-      <div class="ctrl-group">
-        <label class="ctrl-label">Sweep Mode</label>
-        <div class="toggle-row">
-          <button
-            class="toggle-btn"
-            [class.active]="sweepMode === 'full'"
-            (click)="sweepMode = 'full'"
-          >
-            Full 360°
-          </button>
-          <button
-            class="toggle-btn"
-            [class.active]="sweepMode === 'sector'"
-            (click)="sweepMode = 'sector'"
-          >
-            Sector
-          </button>
-        </div>
-      </div>
-
-      <div class="ctrl-group" *ngIf="sweepMode === 'sector'">
-        <label class="ctrl-label">
-          Sector Min <span class="val">{{ sectorMin }}°</span>
-        </label>
-        <input
-          type="range"
-          class="styled-slider"
-          min="-180"
-          max="0"
-          step="5"
-          [value]="sectorMin"
-          (input)="sectorMin = +$any($event.target).value"
-        />
-
-        <label class="ctrl-label" style="margin-top: 6px">
-          Sector Max <span class="val">{{ sectorMax }}°</span>
-        </label>
-        <input
-          type="range"
-          class="styled-slider"
-          min="0"
-          max="180"
-          step="5"
-          [value]="sectorMax"
-          (input)="sectorMax = +$any($event.target).value"
-        />
-      </div>
     </div>
 
+    <!-- ── Hardware & Waveform ──────────────────────────────────────── -->
     <div class="ctrl-section">
       <div class="section-label">Hardware & Waveform</div>
 
       <div class="ctrl-group">
-        <label class="ctrl-label">
-          TX Power (Pt) <span class="val">{{ txPower }} dBm</span>
-        </label>
+        <label class="ctrl-label"
+          >TX Power (Pt) <span class="val">{{ txPower }} dBm</span></label
+        >
         <input
           type="range"
           class="styled-slider"
@@ -104,9 +60,9 @@
       </div>
 
       <div class="ctrl-group">
-        <label class="ctrl-label">
-          Pulse Repetition <span class="val">{{ prfHz / 1000 | number: '1.1-1' }} kHz</span>
-        </label>
+        <label class="ctrl-label"
+          >Pulse Repetition <span class="val">{{ prfHz / 1000 | number: '1.1-1' }} kHz</span></label
+        >
         <input
           type="range"
           class="styled-slider"
@@ -120,9 +76,9 @@
       </div>
 
       <div class="ctrl-group">
-        <label class="ctrl-label">
-          Pulse Width <span class="val">{{ pulseWidthUs | number: '1.1-1' }} µs</span>
-        </label>
+        <label class="ctrl-label"
+          >Pulse Width <span class="val">{{ pulseWidthUs | number: '1.1-1' }} µs</span></label
+        >
         <input
           type="range"
           class="styled-slider"
@@ -136,50 +92,42 @@
       </div>
     </div>
 
+    <!-- ── Derived Parameters ───────────────────────────────────────── -->
     <div class="ctrl-section" *ngIf="radarInfo">
       <div class="section-label">Derived Parameters</div>
 
       <div class="cmp-row" style="margin-bottom: 4px">
         <span class="cmp-label" style="margin-bottom: 0; width: 120px">Array Gain:</span>
-        <span class="cmp-bf better"
-          >{{
-            radarInfo.array_gain_db !== undefined
-              ? (radarInfo.array_gain_db | number: '1.1-1')
-              : radarInfo.main_lobe_width
-                ? 20
-                : 0
-          }}
-          dBi</span
-        >
+        <span class="cmp-bf better">{{ arrayGainDb | number: '1.1-1' }} dBi</span>
       </div>
-
       <div class="cmp-row" style="margin-bottom: 4px">
         <span class="cmp-label" style="margin-bottom: 0; width: 120px">Range Resolution:</span>
         <span class="cmp-bf better">{{ rangeResolutionM | number: '1.1-1' }} m</span>
       </div>
-
       <div class="cmp-row" style="margin-bottom: 4px">
         <span class="cmp-label" style="margin-bottom: 0; width: 120px">Max Unambiguous:</span>
         <span class="cmp-bf better">{{ maxUnambRangeKm | number: '1.1-1' }} km</span>
       </div>
-
       <div class="cmp-row" style="margin-bottom: 4px">
         <span class="cmp-label" style="margin-bottom: 0; width: 120px">HPBW:</span>
-        <span class="cmp-bf better">{{ physicalBeamWidthDeg | number: '1.1-1' }}°</span>
+        <span class="cmp-bf better">{{ hpbwDeg | number: '1.1-1' }}°</span>
       </div>
-
       <div class="cmp-row">
         <span class="cmp-label" style="margin-bottom: 0; width: 120px">Side Lobe Level:</span>
         <span class="cmp-bf better">{{ sideLobeLevel | number: '1.1-1' }} dB</span>
       </div>
     </div>
 
+    <!-- ── Targets ──────────────────────────────────────────────────── -->
+    <!--
+      CHANGE 9 (HTML): Removed hard cap display. Target count is now unbounded (N).
+      CHANGE 11 (HTML): Added RCS slider per target for dynamic resize.
+      NOTE: Middle-click on the env canvas also resizes targets directly.
+    -->
     <div class="ctrl-section">
       <div class="section-label-row">
-        <span class="section-label">Targets ({{ targets.length }}/5)</span>
-        <button class="add-tgt-btn" (click)="addTarget()" [disabled]="targets.length >= 5">
-          + Add
-        </button>
+        <span class="section-label">Targets ({{ targets.length }})</span>
+        <button class="add-tgt-btn" (click)="addTarget()">+ Add</button>
       </div>
 
       <div class="targets-list">
@@ -196,42 +144,41 @@
             </div>
 
             <div style="margin-top: 4px">
-              <label class="ctrl-label" style="font-size: 9px">Angle</label>
+              <label class="ctrl-label" style="font-size: 9px">
+                RCS <span class="val">{{ tgt.rcs | number: '1.1-1' }} m²</span>
+              </label>
               <input
                 type="range"
                 class="styled-slider"
-                min="0"
-                max="359"
-                step="1"
-                [value]="tgt.angle"
-                (input)="tgt.angle = +$any($event.target).value"
-              />
-            </div>
-
-            <div style="margin-top: 4px">
-              <label class="ctrl-label" style="font-size: 9px">Range</label>
-              <input
-                type="range"
-                class="styled-slider"
-                min="0"
-                max="1"
-                step="0.01"
-                [value]="tgt.range"
-                (input)="tgt.range = +$any($event.target).value"
-              />
-            </div>
-
-            <div style="margin-top: 4px">
-              <label class="ctrl-label" style="font-size: 9px">RCS (m²)</label>
-              <input
-                type="range"
-                class="styled-slider"
-                min="1"
-                max="20"
+                min="0.5"
+                max="100"
                 step="0.5"
                 [value]="tgt.rcs"
                 (input)="tgt.rcs = +$any($event.target).value"
               />
+            </div>
+
+            <div style="margin-top: 3px; min-height: 14px;">
+              <span class="tgt-meta" *ngIf="tgt.lastDetection">
+                PA · SNR {{ tgt.lastDetection.snr_db | number: '1.0-0' }} dB ·
+                {{ tgt.lastDetection.range_m / 1000 | number: '1.0-0' }} km ·
+                {{ tgt.lastDetection.angle_deg | number: '1.0-0' }}°.
+                {{ tgt.lastDetection.estimated_rcs }} m²
+              </span>
+              <span class="tgt-meta" *ngIf="!tgt.lastDetection">
+                PA · -
+              </span>
+            </div>
+
+            <div style="margin-top: 2px; min-height: 14px;">
+              <span class="tgt-meta" style="color: var(--accent-green)" *ngIf="tgt.trdLastDetection">
+                TRD · SNR {{ tgt.trdLastDetection.snr_db | number: '1.0-0' }} dB ·
+                {{ tgt.trdLastDetection.range_m / 1000 | number: '1.0-0' }} km
+                {{ tgt.trdLastDetection.estimated_rcs }} m²
+              </span>
+              <span class="tgt-meta" style="color: var(--accent-green)" *ngIf="!tgt.trdLastDetection">
+                TRD · -
+              </span>
             </div>
           </div>
         </div>
@@ -239,20 +186,21 @@
       </div>
     </div>
 
+    <!-- ── Array Configuration ──────────────────────────────────────── -->
     <div class="ctrl-section">
       <div class="section-label">Array Configuration</div>
 
-      <!-- Constants shown as read-only badges -->
       <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px">
-        <span class="const-badge">Geometry: Linear</span>
+        <span class="const-badge">Geometry: Linear (single array)</span>
         <span class="const-badge">Wave Speed: 300,000.0 mm/µs</span>
         <span class="const-badge">Focus: Plane Wave</span>
+        <span class="const-badge">TRD: 0.5 °/line · 15 lines/batch</span>
       </div>
 
       <div class="ctrl-group">
-        <label class="ctrl-label">
-          Elements <span class="val">{{ numElements }}</span>
-        </label>
+        <label class="ctrl-label"
+          >Elements <span class="val">{{ numElements }}</span></label
+        >
         <input
           type="range"
           class="styled-slider"
@@ -266,9 +214,9 @@
       </div>
 
       <div class="ctrl-group">
-        <label class="ctrl-label">
-          Element Spacing <span class="val">{{ elementSpacing | number: '1.1-1' }} mm</span>
-        </label>
+        <label class="ctrl-label"
+          >Element Spacing <span class="val">{{ elementSpacing | number: '1.1-1' }} mm</span></label
+        >
         <input
           type="range"
           class="styled-slider"
@@ -278,13 +226,13 @@
           [value]="elementSpacing"
           (input)="elementSpacing = +$any($event.target).value; onHardwareChange()"
         />
-        <span class="ctrl-hint">↑ spacing = narrower beam</span>
+        <span class="ctrl-hint">↑ spacing → narrower beam, but >λ/2 risks grating lobes</span>
       </div>
 
       <div class="ctrl-group">
-        <label class="ctrl-label">
-          Frequency <span class="val">{{ frequencyGhz | number: '1.1-1' }} GHz</span>
-        </label>
+        <label class="ctrl-label"
+          >Frequency <span class="val">{{ frequencyGhz | number: '1.1-1' }} GHz</span></label
+        >
         <input
           type="range"
           class="styled-slider"
@@ -294,22 +242,7 @@
           [value]="frequencyGhz"
           (input)="frequencyGhz = +$any($event.target).value; onHardwareChange()"
         />
-        <span class="ctrl-hint">↑ frequency = narrower beam</span>
-      </div>
-
-      <div class="ctrl-group">
-        <label class="ctrl-label">
-          Steering Angle <span class="val">{{ steeringAngle | number: '1.0-0' }}°</span>
-        </label>
-        <input
-          type="range"
-          class="styled-slider"
-          min="-60"
-          max="60"
-          step="1"
-          [value]="steeringAngle"
-          (input)="steeringAngle = +$any($event.target).value; onHardwareChange()"
-        />
+        <span class="ctrl-hint">↑ frequency → narrower beam (shorter λ); also tightens λ/2 spacing</span>
       </div>
 
       <div class="ctrl-group">
@@ -327,41 +260,207 @@
       </div>
 
       <div class="ctrl-group">
-        <label class="ctrl-label">
-          SNR <span class="val">{{ snr | number: '1.0-0' }} dB</span>
-        </label>
+        <label class="ctrl-label"
+          >Sim Noise Level <span class="val">{{ snr | number: '1.0-0' }} dB</span></label
+        >
         <input
           type="range"
           class="styled-slider"
           min="0"
-          max="100"
+          max="1000"
           step="1"
           [value]="snr"
           (input)="snr = +$any($event.target).value; onHardwareChange()"
         />
+        <span class="ctrl-hint">Simulated receiver noise amplitude — 1000 = noiseless, 0 = very noisy</span>
       </div>
     </div>
 
+    <!-- ── Environment ─────────────────────────────────────────────── -->
+    <div class="ctrl-section">
+      <div class="section-label">Environment</div>
+
+      <div class="ctrl-group">
+        <label class="ctrl-label">
+          Noise Floor
+          <span class="val">{{ noiseFloorDbm | number: '1.0-0' }} dBm</span>
+        </label>
+        <input
+          type="range"
+          class="styled-slider"
+          min="-130"
+          max="-60"
+          step="1"
+          [value]="noiseFloorDbm"
+          (input)="noiseFloorDbm = +$any($event.target).value; onHardwareChange()"
+        />
+        <span class="ctrl-hint">Receiver thermal noise floor — lower = more sensitive</span>
+      </div>
+
+      <div class="ctrl-group">
+        <label class="ctrl-label">
+          Clutter Floor
+          <span class="val">{{ clutterFloorDbm | number: '1.0-0' }} dBm</span>
+        </label>
+        <input
+          type="range"
+          class="styled-slider"
+          min="-200"
+          max="-40"
+          step="5"
+          [value]="clutterFloorDbm"
+          (input)="clutterFloorDbm = +$any($event.target).value; onHardwareChange()"
+        />
+        <span class="ctrl-hint">Reference clutter power at 1 km — -200 = disabled</span>
+      </div>
+
+      <div class="ctrl-group">
+        <label class="ctrl-label">
+          Clutter Falloff
+          <span class="val">{{ clutterRangeExp | number: '1.0-0' }} dB/dec</span>
+        </label>
+        <input
+          type="range"
+          class="styled-slider"
+          min="-60"
+          max="-10"
+          step="5"
+          [value]="clutterRangeExp"
+          (input)="clutterRangeExp = +$any($event.target).value; onHardwareChange()"
+        />
+        <span class="ctrl-hint">How fast clutter drops with range (-20 = volume, -40 = surface)</span>
+      </div>
+    </div>
+
+    <!-- ── CFAR Detector ────────────────────────────────────────────── -->
+    <div class="ctrl-section">
+      <div class="section-label">CFAR Detector</div>
+
+      <div class="ctrl-group">
+        <label class="ctrl-label">
+          Guard Cells
+          <span class="val">{{ cfarGuardCells }}</span>
+        </label>
+        <input
+          type="range"
+          class="styled-slider"
+          min="1"
+          max="8"
+          step="1"
+          [value]="cfarGuardCells"
+          (input)="cfarGuardCells = +$any($event.target).value; onHardwareChange()"
+        />
+        <span class="ctrl-hint">Bins around CUT excluded from noise estimate — prevents self-masking</span>
+      </div>
+
+      <div class="ctrl-group">
+        <label class="ctrl-label">
+          Reference Cells
+          <span class="val">{{ cfarRefCells }}</span>
+        </label>
+        <input
+          type="range"
+          class="styled-slider"
+          min="4"
+          max="32"
+          step="2"
+          [value]="cfarRefCells"
+          (input)="cfarRefCells = +$any($event.target).value; onHardwareChange()"
+        />
+        <span class="ctrl-hint">More ref cells = stabler noise estimate but misses close targets</span>
+      </div>
+
+      <div class="ctrl-group">
+        <label class="ctrl-label">
+          P(FA)
+          <span class="val">{{ cfarPfa | number: '1.0-6' }}</span>
+        </label>
+        <input
+          type="range"
+          class="styled-slider"
+          min="1"
+          max="6"
+          step="1"
+          [value]="-Math.log10(cfarPfa)"
+          (input)="cfarPfa = Math.pow(10, -$any($event.target).value); onHardwareChange()"
+        />
+        <span class="ctrl-hint">False alarm rate: 10⁻¹ (sensitive) → 10⁻⁶ (strict)</span>
+      </div>
+    </div>
+
+    <!-- ── Detection Meters ─────────────────────────────────────────── -->
     <div class="detect-bar">
       <div class="detect-label">
-        <span>Detections</span>
-        <span class="detect-val">{{ detectedCount }} / {{ targets.length }}</span>
+        <span>PA detections</span>
+        <span class="detect-val">{{ liveDetectedCount }} / {{ targets.length }}</span>
+      </div>
+      <div class="detect-track" style="margin-bottom: 6px">
+        <div
+          class="detect-fill"
+          [style.width.%]="targets.length ? (liveDetectedCount / targets.length) * 100 : 0"
+        ></div>
+      </div>
+      <div class="detect-label">
+        <span>TRD detections</span>
+        <span class="detect-val" style="color: var(--accent-green)">
+          {{ trdLiveDetectedCount }} / {{ targets.length }}
+        </span>
       </div>
       <div class="detect-track">
         <div
           class="detect-fill"
-          [style.width.%]="targets.length ? (detectedCount / targets.length) * 100 : 0"
+          style="background: linear-gradient(90deg, var(--accent-green), #7bc67e)"
+          [style.width.%]="targets.length ? (trdLiveDetectedCount / targets.length) * 100 : 0"
         ></div>
       </div>
     </div>
   </aside>
 
+  <!-- ══ Main Panel ══════════════════════════════════════════════════ -->
   <main class="mode-main">
+    <!--
+      CHANGE 13 / spec §4 "View Stack":
+      Environment canvas placed ABOVE the radar views.
+      Contains the Cartesian grid master view with drag/resize/add/remove.
+    -->
+    <div class="radar-card env-card">
+      <div class="radar-header">
+        <div
+          class="radar-status-dot"
+          style="background: #e8a82b; box-shadow: 0 0 6px rgba(232, 168, 43, 0.7)"
+        ></div>
+        <span class="radar-title">Radar Environment — Master Grid</span>
+        <div class="radar-chips">
+          <span
+            class="chip"
+            style="background: rgba(232, 168, 43, 0.2); color: rgba(255, 200, 100, 0.9)"
+            >Cartesian</span
+          >
+          <span
+            class="chip"
+            style="background: rgba(232, 168, 43, 0.2); color: rgba(255, 200, 100, 0.9)"
+            >Live targets</span
+          >
+        </div>
+      </div>
+      <div class="radar-canvas-wrap">
+        <canvas #envCanvas class="radar-canvas" style="cursor: crosshair; width: 100%; height: 100%;"></canvas>
+      </div>
+      <div class="radar-footer">
+        <span class="footer-note">
+          Left-click: add / drag · Right-click: remove · Middle-click + drag: resize RCS · Dot size
+          ∝ RCS
+        </span>
+      </div>
+    </div>
+
+    <!-- ── Radar PPI row ─────────────────────────────────────────── -->
     <div class="radar-row" style="height: 420px">
+      <!-- Phased Array PPI -->
       <div class="radar-card bf">
         <div class="radar-header">
           <div class="radar-status-dot"></div>
-          <span class="radar-title">Phased Array Simulator</span>
+          <span class="radar-title">Phased Array — PPI</span>
           <div class="radar-chips">
             <span class="chip blue">Electronic steer</span>
             <span class="chip blue">Dynamic HPBW</span>
@@ -372,15 +471,17 @@
         </div>
         <div class="radar-footer">
           <span class="footer-note">
-            Beam synthesized by phase delays. Width ∝ 1/N. Detects using Range-Bin CA-CFAR.
+            Beam synthesized by phase delays · Width ∝ 1/N · CA-CFAR detection · Color = SNR
+            intensity
           </span>
         </div>
       </div>
 
+      <!-- Traditional PPI -->
       <div class="radar-card trd">
         <div class="radar-header">
           <div class="radar-status-dot green"></div>
-          <span class="radar-title">Legacy Radar</span>
+          <span class="radar-title">Legacy Radar — PPI</span>
           <div class="radar-chips">
             <span class="chip green">Mechanical scan</span>
             <span class="chip green">360° sweep</span>
@@ -391,13 +492,15 @@
         </div>
         <div class="radar-footer">
           <span class="footer-note">
-            Single rotating beam — no electronic steering, slower update rate.
+            Single rotating beam · sinc² pattern · No electronic steering · Color = SNR intensity
           </span>
         </div>
       </div>
     </div>
 
+    <!-- ── Auxiliary panels row ──────────────────────────────────── -->
     <div class="radar-row" style="height: 420px">
+      <!-- Interference Map (PA only — updates with every steering step) -->
       <div class="radar-card interference">
         <div class="radar-header">
           <div class="radar-status-dot active"></div>
@@ -406,8 +509,9 @@
             <span
               class="chip amber"
               style="background: rgba(232, 168, 43, 0.2); color: rgba(255, 200, 100, 0.9)"
-              >Element superposition</span
             >
+              Element superposition
+            </span>
           </div>
         </div>
         <div
@@ -434,16 +538,18 @@
                 9px IBM Plex Mono,
                 monospace;
             "
-            >Awaiting scan data…</span
           >
+            Awaiting scan data…
+          </span>
         </div>
         <div class="radar-footer">
           <span class="footer-note">
-            Bright = constructive · Dark = destructive interference between elements
+            Bright = constructive · Dark = destructive · Updates every {{ (360 / steerSpeedDegPerBatch / 30) | number: '1.0-0' }} s est.
           </span>
         </div>
       </div>
 
+      <!-- Beam Pattern -->
       <div class="radar-card" style="border-color: rgba(52, 168, 83, 0.4)">
         <div class="radar-header">
           <div class="radar-status-dot green"></div>
@@ -457,8 +563,7 @@
         </div>
         <div class="radar-footer">
           <span class="footer-note">
-            Normalized dB gain vs steering angle. -3 dB and sidelobe markers derived from backend
-            beamforming.
+            Normalised dB gain vs bearing angle · –3 dB ring shown dashed · Red line = current steering
           </span>
         </div>
       </div>

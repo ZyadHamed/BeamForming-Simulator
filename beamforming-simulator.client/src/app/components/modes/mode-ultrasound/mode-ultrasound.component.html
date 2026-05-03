@@ -76,7 +76,7 @@
             <option value="phased">Phased</option>
           </select>
         </div>
-        <button class="action-btn small" (click)="scanMode !== 'doppler' ? createScenario() : createVesselScenario()" [disabled]="loading">
+        <button class="action-btn small" (click)="scanMode !== 'doppler' ? createCustomScenario() : createVesselScenario()" [disabled]="loading">
           ↻ Rebuild {{ scanMode === 'doppler' ? 'Vessel' : 'Scenario' }}
         </button>
       </div>

@@ -36,7 +36,6 @@
   border-radius: 2px;
 }
 
-/* Reuse shared control tokens */
 .ctrl-section {
   padding: 10px 12px;
   border-bottom: 1px solid var(--border-light);
@@ -59,7 +58,6 @@
   justify-content: space-between;
   margin-bottom: 6px;
 }
-
 .section-label-row .section-label {
   margin-bottom: 0;
 }
@@ -76,7 +74,6 @@
   cursor: pointer;
   transition: all 130ms;
 }
-
 .add-tgt-btn:hover {
   background: var(--accent-blue);
   color: #fff;
@@ -97,7 +94,6 @@
   color: var(--text-secondary);
   margin-bottom: 4px;
 }
-
 .ctrl-label .val {
   font-family: var(--font-mono);
   color: var(--accent-blue);
@@ -117,7 +113,6 @@
   display: block;
   margin-top: 4px;
 }
-
 .styled-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   width: 12px;
@@ -134,7 +129,6 @@
   border-radius: var(--radius-sm);
   overflow: hidden;
 }
-
 .toggle-btn {
   flex: 1;
   padding: 5px 8px;
@@ -148,16 +142,13 @@
   cursor: pointer;
   transition: all 140ms;
 }
-
 .toggle-btn:last-child {
   border-right: none;
 }
-
 .toggle-btn:hover:not(.active) {
   background: var(--bg-hover);
   color: var(--text-primary);
 }
-
 .toggle-btn.active {
   background: var(--accent-blue-bg);
   color: var(--accent-blue);
@@ -170,7 +161,6 @@
   flex-direction: column;
   gap: 3px;
 }
-
 .target-row {
   display: flex;
   align-items: center;
@@ -180,7 +170,6 @@
   background: var(--bg-app);
   border: 1px solid var(--border-light);
 }
-
 .tgt-indicator {
   width: 7px;
   height: 7px;
@@ -189,17 +178,14 @@
   flex-shrink: 0;
   transition: background 200ms;
 }
-
 .tgt-indicator.detected {
   background: var(--accent-green);
   box-shadow: 0 0 5px rgba(52, 168, 83, 0.6);
 }
-
 .tgt-info {
   flex: 1;
   min-width: 0;
 }
-
 .tgt-label {
   display: block;
   font-family: var(--font-mono);
@@ -207,13 +193,11 @@
   font-weight: 700;
   color: var(--text-primary);
 }
-
 .tgt-meta {
   font-family: var(--font-mono);
   font-size: 9px;
   color: var(--text-muted);
 }
-
 .tgt-status {
   font-size: 8px;
   font-weight: 700;
@@ -221,19 +205,16 @@
   border-radius: 3px;
   letter-spacing: 0.05em;
 }
-
 .tgt-status.detected {
   background: rgba(52, 168, 83, 0.15);
   color: var(--accent-green);
 }
-
 .entity-empty {
   font-size: 11px;
   color: var(--text-muted);
   font-style: italic;
   padding: 4px 4px;
 }
-
 .rm-btn {
   background: transparent;
   border: none;
@@ -245,7 +226,6 @@
   opacity: 0.4;
   transition: all 120ms;
 }
-
 .target-row:hover .rm-btn {
   opacity: 1;
 }
@@ -255,27 +235,12 @@
   opacity: 1;
 }
 
-/* ── Array wrap ───────────────────────────────────────────────────── */
-.sidebar-array-wrap {
-  flex-shrink: 0;
-  min-height: 420px;
-  display: flex;
-  flex-direction: column;
-}
-
-.sidebar-array-wrap app-probe-array {
-  flex: 1;
-  min-height: 0;
-  display: block;
-}
-
 /* ── Detection meter ─────────────────────────────────────────────── */
 .detect-bar {
   padding: 8px 12px;
   border-top: 1px solid var(--border-light);
   flex-shrink: 0;
 }
-
 .detect-label {
   display: flex;
   justify-content: space-between;
@@ -284,47 +249,41 @@
   margin-bottom: 5px;
   font-weight: 500;
 }
-
 .detect-val {
   font-family: var(--font-mono);
   color: var(--accent-green);
   font-weight: 700;
 }
-
 .detect-track {
   height: 4px;
   background: #e2e8f0;
   border-radius: 2px;
   overflow: hidden;
 }
-
 .detect-fill {
   height: 100%;
   background: linear-gradient(90deg, var(--accent-green), #7bc67e);
   transition: width 200ms;
 }
 
-/* ── Angle display ────────────────────────────────────────────────── */
-.angle-display {
-  padding: 8px 12px;
-  border-top: 1px solid var(--border-light);
-  text-align: center;
-  flex-shrink: 0;
-}
-
-.angle-val {
-  display: block;
+/* ── Const badge ──────────────────────────────────────────────────── */
+.const-badge {
   font-family: var(--font-mono);
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--accent-blue);
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--bg-app);
+  border: 1px solid var(--border-light);
+  border-radius: 3px;
+  padding: 2px 6px;
 }
 
-.angle-sub {
+.ctrl-hint {
+  display: block;
   font-size: 9px;
   color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  font-style: italic;
+  margin-top: 2px;
 }
 
 /* ══ Main radar displays ════════════════════════════════════════════ */
@@ -379,23 +338,16 @@
   border-radius: 50%;
   background: var(--accent-blue);
   box-shadow: 0 0 6px rgba(26, 115, 232, 0.7);
-  animation: blink 1.8s ease-in-out infinite;
   flex-shrink: 0;
+  /*
+   * CHANGE 2 (CSS): REMOVE blink/@keyframes animation.
+   * Spec §4 "Visual Purge": remove all "beeping dots" and "unnecessary circles".
+   * Status indicators must be static — no animated glow/pulse.
+   */
 }
-
 .radar-status-dot.green {
   background: var(--accent-green);
   box-shadow: 0 0 6px rgba(52, 168, 83, 0.7);
-}
-
-@keyframes blink {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.3;
-  }
 }
 
 .radar-title {
@@ -418,7 +370,6 @@
   padding: 2px 7px;
   border-radius: 20px;
 }
-
 .chip.blue {
   background: rgba(26, 115, 232, 0.2);
   color: rgba(100, 200, 255, 0.9);
@@ -432,8 +383,9 @@
   flex: 1;
   position: relative;
   overflow: hidden;
+  min-height: 0;        /* ← allows flex shrink but keeps flex: 1 working */
+  height: 100%;         /* ← ensures the wrapper fills the card height */
 }
-
 .radar-canvas {
   display: block;
   width: 100%;
@@ -446,7 +398,6 @@
   border-top: 1px solid rgba(255, 255, 255, 0.05);
   flex-shrink: 0;
 }
-
 .footer-note {
   font-size: 9px;
   color: rgba(255, 255, 255, 0.3);
@@ -460,7 +411,6 @@
   gap: 8px;
   flex-shrink: 0;
 }
-
 .cmp-card {
   background: var(--bg-surface);
   border: 1px solid var(--border);
@@ -468,7 +418,6 @@
   padding: 8px 10px;
   box-shadow: var(--shadow-sm);
 }
-
 .cmp-label {
   font-size: 9px;
   font-weight: 700;
@@ -477,21 +426,18 @@
   color: var(--text-muted);
   margin-bottom: 5px;
 }
-
 .cmp-row {
   display: flex;
   align-items: center;
   gap: 5px;
   flex-wrap: wrap;
 }
-
 .cmp-bf,
 .cmp-trd {
   font-size: 10px;
   font-weight: 500;
   color: var(--text-secondary);
 }
-
 .cmp-bf.better {
   color: var(--accent-blue);
   font-weight: 700;
@@ -500,32 +446,29 @@
   color: var(--accent-green);
   font-weight: 700;
 }
-
 .cmp-vs {
   font-size: 9px;
   color: var(--text-muted);
   font-style: italic;
   flex-shrink: 0;
 }
+
+/* ── Interference card ────────────────────────────────────────────── */
 .radar-card.interference {
   border-color: rgba(232, 168, 43, 0.4);
 }
 
-.const-badge {
-  font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 600;
-  color: var(--text-muted);
-  background: var(--bg-app);
-  border: 1px solid var(--border-light);
-  border-radius: 3px;
-  padding: 2px 6px;
-}
-
-.ctrl-hint {
-  display: block;
-  font-size: 9px;
-  color: var(--text-muted);
-  font-style: italic;
-  margin-top: 2px;
+/* ── Environment card (master grid — CHANGE 13 / spec §4 "View Stack") ── */
+/*
+ * CHANGE 13 (CSS): env-card is now the top-most view ("Master Grid").
+ * Increased min-height so the Cartesian grid has enough space to be readable,
+ * and set flex-grow:0 / flex-shrink:0 so it doesn't collapse when radar rows
+ * expand. Height is fixed at 280px — enough for the grid without dominating.
+ */
+.env-card {
+  border-color: rgba(232, 168, 43, 0.4);
+  height: 280px;
+  min-height: 280px;   /* ← prevents collapse to a thin line */
+  flex-shrink: 0;
+  flex-grow: 0;
 }

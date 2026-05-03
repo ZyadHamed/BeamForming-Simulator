@@ -62,7 +62,6 @@ class UltrasoundScenario(Scenario):
         max_time_us = (2.0 * max_depth_mm) / c
         num_samples = int(max_time_us * sampling_rate_mhz)
 
-        # This is likely your other bottleneck (see step 2 below)
         channel_data, time_vector = self._engine.compute_channel_data(num_samples, sampling_rate_mhz)
 
         num_depth_samples = len(time_vector)
@@ -97,7 +96,11 @@ class UltrasoundScenario(Scenario):
             if not el.enabled:
                 continue
             # np.interp is still called, but the math leading up to it is now instantly computed in C
-            aligned_signal = np.interp(times_of_flight[i], time_vector, channel_data[i])
+            aligned_signal = np.where(
+                (times_of_flight[i] >= time_vector[0]) & (times_of_flight[i] <= time_vector[-1]),
+                np.interp(times_of_flight[i], time_vector, channel_data[i]),
+                0.0  # Don't clamp — return zero for out-of-bounds
+            )
             summed_rf_signal += aligned_signal * el.apodization_weight
 
         return summed_rf_signal, depths_mm
@@ -105,6 +108,8 @@ class UltrasoundScenario(Scenario):
     def generate_a_mode(self, angle_deg: float, max_depth_mm: float) -> AModeResult:
         """Generates standard amplitude envelopes for structural imaging."""
         summed_rf_signal, depths_mm = self._beamform_raw_rf(angle_deg, max_depth_mm)
+
+        summed_rf_signal = summed_rf_signal - np.mean(summed_rf_signal)
 
         analytic_signal = hilbert(summed_rf_signal)
         envelope = np.abs(analytic_signal)
@@ -137,7 +142,7 @@ class UltrasoundScenario(Scenario):
             image_grid=pixel_intensities.tolist()
         )
 
-    def generate_doppler_line(self, angle_deg: float, max_depth_mm: float, prf_hz: float = 4000.0, packet_size: int = 8) -> DopplerResult:
+    def generate_doppler_line(self, angle_deg: float, max_depth_mm: float, prf_hz: float = 4000.0, packet_size: int = 8, power_threshold_db: float = 15.0 ) -> DopplerResult:
         """
         Calculates fluid velocities using the Kasai Autocorrelation algorithm.
         Gracefully handles both static and dynamic environments.
@@ -186,6 +191,13 @@ class UltrasoundScenario(Scenario):
         # 3. Convert phase shift to velocity (m/s)
         c_ms = c * 1000 # convert from mm/us to m/s
         velocities_ms = (c_ms * prf_hz * delta_phi) / (4 * np.pi * f0)
+
+        max_power = np.max(power) if np.max(power) > 0 else 1.0
+        power_db = 10.0 * np.log10((power / max_power) + 1e-9)
+        
+        # Zero out velocities where Doppler power is below threshold
+        noise_mask = power_db < -power_threshold_db
+        velocities_ms[noise_mask] = 0.0
 
         return DopplerResult(
             angle_deg=angle_deg,

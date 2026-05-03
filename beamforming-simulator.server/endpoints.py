@@ -8,8 +8,9 @@ from PIL import Image
 import io
 import json
 from dataclasses import asdict
+import asyncio
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Query
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse, JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -774,6 +775,7 @@ def _compute_sector_pattern(sector, local_angles_deg: list):
 
 # --- Radar State ---
 active_radar: Optional[RadarScenario] = None
+_radar_lock = asyncio.Lock()  
 
 # --- Radar DTOs ---
 class RadarSetupRequest(BaseModel):
@@ -805,19 +807,20 @@ class RadarSetupRequest(BaseModel):
     cfar_pfa         : float  = 1e-4
 
 class RadarTargetDTO(BaseModel):
-    target_id  : str
-    x_m        : float
-    y_m        : float
-    velocity_m_s: float = 0.0
-    rcs_sqm    : float
+    target_id        : str
+    x_m              : float
+    y_m              : float
+    rcs_sqm          : float
+    target_extent_m  : float = 0.0   # pass through to RadarTarget
 
 class RadarScanRequest(BaseModel):
     start_angle    : float
     end_angle      : float
     num_lines      : int   = 36
     max_range_m    : float = 150_000.0
-    num_range_bins : int   = 128
+    num_range_bins : int   = 128          # ← ADDED
     targets        : List[RadarTargetDTO]
+    radar_type     : Literal['phased_array', 'traditional'] = 'phased_array'
 
 class RadarInfoResponse(BaseModel):
     """
@@ -894,7 +897,7 @@ def _build_array_config(req: RadarSetupRequest) -> ArrayConfig:
         apodization_window = req.apodization,
         kaiser_beta        = 14.0,
         tukey_alpha        = 0.5,
-        wave_speed         = 300_000.0,
+        wave_speed         = 299_792_458.0 * 1e-3,   # mm/µs
     )
     # Apply apodization only when elements weren't supplied with explicit weights
     if not req.elements:
@@ -902,6 +905,36 @@ def _build_array_config(req: RadarSetupRequest) -> ArrayConfig:
 
     return config
 
+# REPLACE _compute_and_send_interference (lines 295–319) WITH:
+def _compute_interference_only(radar, steering_angle: float = 0.0) -> dict:
+    """CPU-bound interference + beamforming computation. No I/O. Returns a plain dict."""
+    try:
+        n_el     = len([e for e in radar.config.elements if e.enabled])
+        aperture = (n_el - 1) * radar.config.element_spacing
+        width_mm = max(aperture * 4, 100.0)
+        res_mm   = width_mm / 250.0
+
+        interference = radar.compute_interference_field(
+            width_mm       = width_mm,
+            depth_mm       = width_mm,
+            resolution_mm  = res_mm,
+            steering_angle = steering_angle,
+        )
+        bf_result = radar.compute_beamforming_4face(steering_angle=steering_angle)
+
+        return {
+            "interference_image": interference.image_base64,
+            "interference_cols":  interference.cols,
+            "interference_rows":  interference.rows,
+            "beam_pattern":       bf_result.beam_pattern_db,
+            "angles_deg":         bf_result.angles_deg,
+            "beam_angle":         bf_result.beam_angle,
+            "main_lobe_width":    bf_result.main_lobe_width,
+            "side_lobe_level":    bf_result.side_lobe_level,
+        }
+    except Exception:
+        return {}
+    
 @app.post("/radar/setup", response_model=RadarInfoResponse)
 def radar_setup(req: RadarSetupRequest):
     """
@@ -945,7 +978,7 @@ def radar_setup(req: RadarSetupRequest):
     
     # Compute the antenna's beam pattern so the UI can graph the lobes!
     config.calculate_steering_delays()
-    bf_result = config.compute_beamforming()
+    bf_result = active_radar.compute_beamforming_4face()
     
     n_el      = len([e for e in active_radar.config.elements if e.enabled])
     aperture  = (n_el - 1) * active_radar.config.element_spacing
@@ -988,58 +1021,112 @@ def radar_setup(req: RadarSetupRequest):
         interference_rows  = interference.rows,
     )
 
-@app.post("/radar/scan")
-def radar_scan(req: RadarScanRequest):
-    """
-    Execute a PPI sector scan and return sweep data plus CFAR detections.
-    """
-    global active_radar
+@app.websocket("/radar/scan")
+async def ws_radar_scan(websocket: WebSocket):
+    await websocket.accept()
+    frame_counter = 0
+    try:
+        while True:
+            raw = await websocket.receive_text()
 
-    if active_radar is None:
-        raise HTTPException(
-            status_code = 400,
-            detail      = "Radar not initialized. Call POST /radar/setup first.",
-        )
+            # "READY" is sent by the client as the initial handshake kick
+            # and as the ack after drawing each batch. It carries no scan
+            # parameters, so we simply wait for the next real message.
+            if raw.strip() == "READY":
+                continue
 
-    if len(req.targets) > 5:
-        raise HTTPException(
-            status_code = 422,
-            detail      = "Maximum of 5 solid bodies allowed per the simulator spec.",
-        )
+            msg = json.loads(raw)
 
-    # Replace environment targets via the encapsulated method
-    # (does not trigger a full re-instantiation of the scenario)
-    active_radar.environment.targets = [
-        RadarTarget(
-            target_id    = t.target_id,
-            x_m          = t.x_m,
-            y_m          = t.y_m,
-            velocity_m_s = t.velocity_m_s,
-            rcs_sqm      = t.rcs_sqm,
-        ) for t in req.targets
-    ]
+            if active_radar is None:
+                await websocket.send_text(json.dumps({"error": "Radar not initialized"}))
+                continue
 
-    result = active_radar.generate_ppi_scan(
-        start_angle    = req.start_angle,
-        end_angle      = req.end_angle,
-        num_lines      = req.num_lines,
-        max_range_m    = req.max_range_m,
-        num_range_bins = req.num_range_bins,
-    )
+            req = RadarScanRequest(**msg)
 
-    return {
-            "sweep_data" : result.sweep_data,
-            "detections" : [vars(d) for d in result.detections],
-        }
+            async with _radar_lock:
+                active_radar.environment.targets = [
+                    RadarTarget(
+                        target_id    = t.target_id,
+                        x_m          = t.x_m,
+                        y_m          = t.y_m,
+                        rcs_sqm      = t.rcs_sqm,
+                        target_extent_m = t.target_extent_m,
+                    ) for t in req.targets
+                ]
+                if req.radar_type == 'traditional':
+                    result = active_radar.generate_traditional_scan(
+                        start_angle    = req.start_angle,
+                        end_angle      = req.end_angle,
+                        num_lines      = req.num_lines,
+                        max_range_m    = req.max_range_m,
+                        num_range_bins = req.num_range_bins,
+                    )
+                else:
+                    result = active_radar.generate_ppi_scan(
+                        num_lines      = req.num_lines,
+                        max_range_m    = req.max_range_m,
+                        num_range_bins = req.num_range_bins,
+                    )
 
-# --- Pydantic Schemas for API I/O ---
+            frame_counter += 1
 
-    # ── Convert dataclass → plain dict for JSON serialization ──────
-    return {
-        "timestamp": result.timestamp,
-        "active_connections": [asdict(link) for link in result.active_connections],
-        "dropped_users": result.dropped_users,
-    }
+            payload: dict = {
+                "sweep_data": result.sweep_data,
+                "detections": [vars(d) for d in result.detections],
+            }
+
+            # ── Interference field (every frame for phased array, non-blocking) ──
+            if req.radar_type == 'phased_array':
+                mid_angle = (req.start_angle + req.end_angle) / 2.0 % 360.0
+                loop = asyncio.get_event_loop()
+                interference_result = await loop.run_in_executor(
+                    None, _compute_interference_only, active_radar, mid_angle
+                )
+                if interference_result:
+                    payload.update(interference_result)
+
+            # ── Focused scans (serialised, capped, lock-free across await) ──
+            if req.radar_type == 'phased_array' and result.detections:
+                MAX_FOCUSED_SCANS = 2
+                seen_angles: set[float] = set()
+                angles_to_scan: list[float] = []
+                for det in result.detections:
+                    rounded = round(det.angle_deg, 1)
+                    if rounded not in seen_angles:
+                        seen_angles.add(rounded)
+                        angles_to_scan.append(det.angle_deg)
+                    if len(angles_to_scan) >= MAX_FOCUSED_SCANS:
+                        break
+
+                seen_ids = {d["target_id"] for d in payload["detections"]}
+                for angle in angles_to_scan:
+                    # Run in executor WITHOUT holding _radar_lock across the await.
+                    # scan_focused snapshots and restores config in its own finally
+                    # block. The main scan for this frame is already complete so
+                    # there is no concurrent config mutation to guard against here.
+                    focused_result = await asyncio.get_event_loop().run_in_executor(
+                        None, active_radar.scan_focused, angle,
+                        req.max_range_m, req.num_range_bins,
+                    )
+                    payload["sweep_data"].extend(focused_result.sweep_data)
+                    for det in focused_result.detections:
+                        if det.target_id not in seen_ids:
+                            seen_ids.add(det.target_id)
+                            payload["detections"].append(vars(det))
+
+            await websocket.send_text(json.dumps(payload))
+
+    except WebSocketDisconnect:
+        pass
+
+# # --- Pydantic Schemas for API I/O ---
+
+#     # ── Convert dataclass → plain dict for JSON serialization ──────
+#     return {
+#         "timestamp": result.timestamp,
+#         "active_connections": [asdict(link) for link in result.active_connections],
+#         "dropped_users": result.dropped_users,
+#     }
 
 
 # ── Beamforming Endpoints ──────────────────────────────────────────

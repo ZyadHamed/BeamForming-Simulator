@@ -588,3 +588,32 @@ kbd {
   border-radius: 50%;
   flex-shrink: 0;
 }
+.live-beam-panel {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  background: rgba(255,255,255,0.93);
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 8px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.12);
+  z-index: 10;
+}
+
+.live-beam-canvas {
+  display: block;
+}
+
+.live-beam-stats {
+  display: flex;
+  gap: 10px;
+  font: 9px 'IBM Plex Mono', monospace;
+  color: #555;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+/* Make env-wrap position:relative so the panel anchors to it */
+.env-wrap {
+  position: relative;
+}
