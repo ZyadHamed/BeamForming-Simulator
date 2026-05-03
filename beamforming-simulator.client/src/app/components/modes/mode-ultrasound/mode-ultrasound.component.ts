@@ -136,6 +136,9 @@ export class ModeUltrasoundComponent implements OnInit, OnDestroy {
   private probeDrag = false;
   private beamDrag  = false;
 
+  cursorX = 0;
+cursorZ = 0;
+
   /* ── shared probe spec ──────────────────────────────────────── */
   probe: ProbeSpec = {
     num_elements: 32, pitch_mm: .2, frequency_mhz: 5,
@@ -345,7 +348,12 @@ runScan() {
     }
     if (hit) { hit.hovered = true; this.hoveredRegion = hit; this.tooltipX = mx + 14; this.tooltipY = my - 8; }
     else      { this.hoveredRegion = null; }
-    this.cdr.markForCheck();
+
+    const p = this.probePos();
+    this.cursorX = +(mmX - p.x).toFixed(1);
+    this.cursorZ = +(mmZ - p.z).toFixed(1);
+    this.cdr.detectChanges();
+
   }
 
   onPhantomDown(ev: MouseEvent) {
@@ -459,6 +467,21 @@ runScan() {
       ctx.restore();
     });
 
+        // Depth axis (Z) labels — left side
+ctx.fillStyle = 'rgba(140,160,190,.5)';
+ctx.font = '8px IBM Plex Mono,monospace';
+ctx.textAlign = 'right';
+const p = this.probePos();
+for (let z = -SCALE/2; z <= SCALE/2; z += 10) {
+  ctx.fillText(`${(z - p.z).toFixed(0)}`, tx(-o.semi_axis_x) - 4, tz(z) + 3);
+}
+// Width axis (X) labels — top
+ctx.textAlign = 'center';
+for (let x = -SCALE/2; x <= SCALE/2; x += 10) {
+  ctx.fillText(`${(x - p.x).toFixed(0)}`, tx(x), 12);
+}
+
+
     // probe
     const pp = this.probePos(), ppx = tx(pp.x), ppz = tz(pp.z);
     ctx.save(); ctx.translate(ppx, ppz); ctx.rotate(this.probeAngle * Math.PI / 180);
@@ -499,11 +522,18 @@ runScan() {
     ctx.fillStyle = 'rgba(255,220,100,.8)'; ctx.font = '9px IBM Plex Mono,monospace'; ctx.textAlign = 'left';
     ctx.fillText(`steer ${this.beamSteer.toFixed(1)}°  →  ${(this.probeAngle + this.beamSteer).toFixed(1)}° abs`, hpx + 10, hpz + 3);
 
+    ctx.fillStyle = 'rgba(255,220,100,.75)';
+    ctx.font = '9px IBM Plex Mono,monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText(`X: ${this.cursorX.toFixed(1)} mm   Z: ${this.cursorZ.toFixed(1)} mm`, 10, H - 8);
+
     // scale bar
     ctx.fillStyle = 'rgba(150,160,180,.5)'; ctx.font = '9px IBM Plex Mono,monospace'; ctx.textAlign = 'left';
     const sb = 10 * this.pScale;
     ctx.fillRect(W - 20 - sb, H - 20, sb, 2);
     ctx.fillText('10 mm', W - 20 - sb, H - 24);
+
+
   }
 
   // ════════════════════════════════════════════════════════════
