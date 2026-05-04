@@ -164,9 +164,11 @@ class VesselSpec(BaseModel):
 
 
 class CreateVesselScenarioRequest(BaseModel):
-    session_id:  str        = Field(..., description="Arbitrary client-chosen key")
-    probe:       ProbeSpec
-    vessel_spec: VesselSpec
+    session_id:        str
+    probe:             ProbeSpec
+    vessel_spec:       VesselSpec
+    probe_origin_x_mm: float = Field(0.0, description="Probe surface X (mm)")
+    probe_origin_z_mm: float = Field(0.0, description="Probe surface Z (mm)")
 
 
 class CreateVesselScenarioResponse(BaseModel):
@@ -207,11 +209,13 @@ class ColorDopplerResponse(BaseModel):
     power_grid:        List[List[float]]
 
 class CreateScenarioRequest(BaseModel):
-    session_id:          str
-    probe:               ProbeSpec
-    use_shepp_logan:     bool = True
-    shepp_logan_scale_mm: float = Field(60.0, gt=0, description="Physical size of the Shepp-Logan phantom")
-    phantom_spec:        Optional[PhantomSpec] = None
+    session_id:           str
+    probe:                ProbeSpec
+    use_shepp_logan:      bool = True
+    shepp_logan_scale_mm: float = Field(60.0, gt=0)
+    phantom_spec:         Optional[PhantomSpec] = None
+    probe_origin_x_mm:    float = Field(0.0, description="Probe surface X position in phantom space (mm)")
+    probe_origin_z_mm:    float = Field(0.0, description="Probe surface Z position in phantom space (mm)")
 
 
 class CreateScenarioResponse(BaseModel):
@@ -301,9 +305,11 @@ def build_phantom_env(regions: List[TissueRegion],
                         break
                 R = abs((region.acoustic_impedance - Z_out) /
                         (region.acoustic_impedance + Z_out))
-                refl = R * 5.0 * (0.9 + 0.1 * rng.random())
-                scatterers.append(Scatterer(rx, rz + z_offset,
-                                            float(np.clip(refl, 0, 1))))
+                # Store true reflection coefficient R ∈ [0, 1] with small
+                # per-scatterer jitter. No *5 amplification — that was
+                # saturating all boundaries at 1.0 and hiding impedance differences.
+                refl = float(np.clip(R * (0.9 + 0.1 * rng.random()), 0.0, 1.0))
+                scatterers.append(Scatterer(rx, rz + z_offset, refl))
 
     xs = np.arange(-half, half, grid_spacing_mm)
     zs = np.arange(0, half * 2, grid_spacing_mm)
@@ -398,8 +404,26 @@ def create_scenario(req: CreateScenarioRequest):
             noise_density=0.05,
             n_boundary=50,
         )
+        z_shift = scale / 2.0
         for s in env.scatterers:
-            s.z += scale / 2.0
+            s.z += z_shift
+        # Shift region centers to match scatterer coordinates so the shadow
+        # ray-marcher operates in the same coordinate space as the scatterers.
+        shifted_regions = [
+            TissueRegion(
+                name                      = r.name,
+                center_x                  = r.center_x,
+                center_z                  = r.center_z + z_shift,
+                semi_axis_x               = r.semi_axis_x,
+                semi_axis_z               = r.semi_axis_z,
+                rotation_deg              = r.rotation_deg,
+                speed_of_sound            = r.speed_of_sound,
+                attenuation_db_per_cm_mhz = r.attenuation_db_per_cm_mhz,
+                density_kg_m3             = r.density_kg_m3,
+                is_fluid                  = r.is_fluid,
+            )
+            for r in regions
+        ]
 
     else:
         if req.phantom_spec is None:
@@ -435,10 +459,24 @@ def create_scenario(req: CreateScenarioRequest):
             z_offset        = req.phantom_spec.z_offset_mm,
             max_scatterers  = req.phantom_spec.max_scatterers,
         )
+        # For custom phantoms, z_offset is already baked into region.center_z
+        # by the user, so no additional shift is needed.
+        shifted_regions = regions
 
     # ── 3. Instantiate and store scenario ────────────────────
-    engine   = PulseEchoEngine(array=cfg, environment=env)
-    scenario = UltrasoundScenario(config=cfg, environment=env, engine=engine)
+    # Pass shifted_regions into the engine so per-scatterer shadowing
+    # uses true impedances in the correct (z-shifted) coordinate space.
+
+    engine = PulseEchoEngine(
+        array=cfg, environment=env, regions=shifted_regions,
+        probe_origin_x=req.probe_origin_x_mm,
+        probe_origin_z=req.probe_origin_z_mm,
+    )
+    scenario = UltrasoundScenario(
+        config=cfg, environment=env, engine=engine,
+        probe_origin_x=req.probe_origin_x_mm,
+        probe_origin_z=req.probe_origin_z_mm,
+    )
     _sessions[req.session_id] = scenario
 
     return CreateScenarioResponse(
@@ -528,8 +566,16 @@ def create_vessel_scenario(req: CreateVesselScenarioRequest):
         background_noise        = v.background_noise,
     )
 
-    engine   = PulseEchoEngine(array=cfg, environment=env)
-    scenario = UltrasoundScenario(config=cfg, environment=env, engine=engine)
+    engine = PulseEchoEngine(
+        array=cfg, environment=env, regions=None,
+        probe_origin_x=req.probe_origin_x_mm,  # add to CreateVesselScenarioRequest too
+        probe_origin_z=req.probe_origin_z_mm,
+    )
+    scenario = UltrasoundScenario(
+        config=cfg, environment=env, engine=engine,
+        probe_origin_x=req.probe_origin_x_mm,
+        probe_origin_z=req.probe_origin_z_mm,
+    )
     _sessions[req.session_id] = scenario
 
     return CreateVesselScenarioResponse(

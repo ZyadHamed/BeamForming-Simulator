@@ -29,6 +29,8 @@ interface ProbeSpec {
 interface CreateScenarioReq {
   session_id: string; probe: ProbeSpec;
   use_shepp_logan: boolean; shepp_logan_scale_mm: number;
+  probe_origin_x_mm: number;   // ADD
+  probe_origin_z_mm: number;   // ADD
   phantom_spec?: {
     regions: TissueRegionSpec[]; n_boundary: number;
     grid_spacing_mm: number; noise_density: number;
@@ -49,7 +51,11 @@ interface VesselSpec {
   radius_mm: number; velocity_magnitude_mms: number;
   num_blood_cells: number; background_noise: number;
 }
-interface CreateVesselReq { session_id: string; probe: ProbeSpec; vessel_spec: VesselSpec; }
+interface CreateVesselReq {
+  session_id: string; probe: ProbeSpec; vessel_spec: VesselSpec;
+  probe_origin_x_mm: number;   // ADD
+  probe_origin_z_mm: number;   // ADD
+}
 interface CreateVesselRes { session_id: string; num_scatterers: number; message: string; }
 
 interface DopplerLineRes  { angle_deg: number; depths_mm: number[]; velocities_ms: number[]; power: number[]; }
@@ -187,34 +193,40 @@ private lastProbeAngleAtScan = 0;
   ngOnDestroy() { cancelAnimationFrame(this.anim); }
 
   // ── phantom scenario ─────────────────────────────────────────
-  createScenario() {
-    this.setLoading('Creating phantom scenario…');
-    this.scenarioReady = false;
-    this.sessionId = 'us_' + Math.random().toString(36).slice(2, 8);
-    this.http.post<CreateScenarioRes>(`${this.api}/scenario/create`, {
-      session_id: this.sessionId, probe: { ...this.probe },
-      use_shepp_logan: true, shepp_logan_scale_mm: this.phantomScale,
-    } as CreateScenarioReq).subscribe({
-      next: r => { this.scenarioReady = true; this.numScatterers = r.num_scatterers; this.clearLoading(); },
-      error: e => this.setError(e),
-    });
-  }
+createScenario() {
+  this.setLoading('Creating phantom scenario…');
+  this.scenarioReady = false;
+  this.sessionId = 'us_' + Math.random().toString(36).slice(2, 8);
+  const p = this.probePos();                          // ADD
+  this.http.post<CreateScenarioRes>(`${this.api}/scenario/create`, {
+    session_id: this.sessionId, probe: { ...this.probe },
+    use_shepp_logan: true, shepp_logan_scale_mm: this.phantomScale,
+    probe_origin_x_mm: p.x,                           // ADD
+    probe_origin_z_mm: p.z + this.phantomScale / 2,   // ADD — convert to backend z-space
+  } as CreateScenarioReq).subscribe({
+    next: r => { this.scenarioReady = true; this.numScatterers = r.num_scatterers; this.clearLoading(); },
+    error: e => this.setError(e),
+  });
+}
 
-  createCustomScenario() {
-    this.setLoading('Recreating with edited regions…');
-    this.scenarioReady = false;
-    this.sessionId = 'us_' + Math.random().toString(36).slice(2, 8);
-    const regs: TissueRegionSpec[] = this.regions.map(({ hovered, editing, ...r }) => r);
-    this.http.post<CreateScenarioRes>(`${this.api}/scenario/create`, {
-      session_id: this.sessionId, probe: { ...this.probe },
-      use_shepp_logan: false, shepp_logan_scale_mm: this.phantomScale,
-      phantom_spec: { regions: regs, n_boundary: 50, grid_spacing_mm: 2,
-        noise_density: .05, seed: 42, z_offset_mm: this.phantomScale / 2, max_scatterers: 5000 },
-    } as CreateScenarioReq).subscribe({
-      next: r => { this.scenarioReady = true; this.numScatterers = r.num_scatterers; this.clearLoading(); },
-      error: e => this.setError(e),
-    });
-  }
+createCustomScenario() {
+  this.setLoading('Recreating with edited regions…');
+  this.scenarioReady = false;
+  this.sessionId = 'us_' + Math.random().toString(36).slice(2, 8);
+  const p = this.probePos();                          // ADD
+  const regs: TissueRegionSpec[] = this.regions.map(({ hovered, editing, ...r }) => r);
+  this.http.post<CreateScenarioRes>(`${this.api}/scenario/create`, {
+    session_id: this.sessionId, probe: { ...this.probe },
+    use_shepp_logan: false, shepp_logan_scale_mm: this.phantomScale,
+    probe_origin_x_mm: p.x,                           // ADD
+    probe_origin_z_mm: p.z + this.phantomScale / 2,   // ADD
+    phantom_spec: { regions: regs, n_boundary: 50, grid_spacing_mm: 2,
+      noise_density: .05, seed: 42, z_offset_mm: this.phantomScale / 2, max_scatterers: 5000 },
+  } as CreateScenarioReq).subscribe({
+    next: r => { this.scenarioReady = true; this.numScatterers = r.num_scatterers; this.clearLoading(); },
+    error: e => this.setError(e),
+  });
+}
 
   // ── vessel scenario (independent) ────────────────────────────
   createVesselScenario() {
@@ -224,6 +236,8 @@ private lastProbeAngleAtScan = 0;
     this.http.post<CreateVesselRes>(`${this.api}/scenario/create_vessel`, {
       session_id: this.vesselSessionId,
       probe: { ...this.probe },
+      probe_origin_x_mm: 0,    // ADD — vessel probe is always centered at z=0
+      probe_origin_z_mm: 0,  
       vessel_spec: {
         start_x_mm: this.vStartX, start_z_mm: this.vStartZ,
         direction_x: this.vDirX,  direction_z: this.vDirZ,
@@ -381,7 +395,14 @@ runScan() {
     }
   }
 
-  onPhantomUp()    { this.probeDrag = false; this.beamDrag = false; }
+  onPhantomUp() {
+  const wasDraggingProbe = this.probeDrag;   // capture before clearing
+  this.probeDrag = false;
+  this.beamDrag  = false;
+  if (wasDraggingProbe) {
+    this.createScenario();   // re-create with new probe origin
+  }
+}
   onPhantomLeave() {
     this.probeDrag = false; this.beamDrag = false;
     this.hoveredRegion = null; this.regions.forEach(r => r.hovered = false);
