@@ -439,14 +439,14 @@ removeTarget(id: string): void {
 
       for (let i = 0; i < nBins; i++) {
         const v = bins[i];
-        if (v < 0.05) continue;
+        if (v < 0.18) continue;                              // bright circles
         const r0 = (i       / nBins) * R;
         const r1 = ((i + 1) / nBins) * R;
         ctx.beginPath();
         ctx.arc(cx, cy, r1, sRad - halfRad, sRad + halfRad);
         ctx.arc(cx, cy, r0, sRad + halfRad, sRad - halfRad, true);
         ctx.closePath();
-        ctx.fillStyle = `rgba(${bR},${bG},${bB},${(0.12 + v * 0.83).toFixed(2)})`;
+        ctx.fillStyle = `rgba(${bR},${bG},${bB},${(v * v * 0.95).toFixed(2)})`;      // bright circles
         ctx.fill();
       }
     }
