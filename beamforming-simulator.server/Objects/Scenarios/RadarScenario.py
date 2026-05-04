@@ -232,7 +232,7 @@ class RadarScenario(Scenario):
             pr_dbm = (
                 pt_dbm
                 + 2.0 * one_way_gain_db
-                + 2.0 * lam_db
+                + lam_db
                 + target.rcs_db
                 - _4PI3_DB
                 - 40.0 * math.log10(max(r, 1.0))
@@ -413,7 +413,7 @@ class RadarScenario(Scenario):
                 pr_dbm = (
                     pt_dbm
                     + 2.0 * one_way_gain_db
-                    + 2.0 * lam_db
+                    + lam_db
                     + target.rcs_db
                     - _4PI3_DB
                     - 40.0 * math.log10(max(r, 1.0))
@@ -545,14 +545,14 @@ class RadarScenario(Scenario):
         g0_db  = self.array_gain_db
         pt_dbm = self._waveform.pt_dbm
 
-        # Steer from 0° to 180° — covers the full 360° via front/back symmetry
-        steer_angles = np.linspace(0.0, 180.0, max(num_lines // 2, 1), endpoint=False)
+        steer_angles = np.linspace(-90.0, 90.0, max(num_lines // 2, 1), endpoint=False)
 
         sweep_data : List[dict]           = []
         best_det   : dict                 = {}   # target_id → best-SNR RadarDetection
 
         # ── Pass 1: scan the front half-space ─────────────────────────────────
-        for steer_angle in steer_angles:
+        for raw_angle in steer_angles:
+            steer_angle = raw_angle % 360.0
             mirror_angle = (180.0 - steer_angle) % 360.0
 
             power_bins, bp_db, bp_ang = self._run_dwell(
@@ -662,7 +662,7 @@ class RadarScenario(Scenario):
                     det = RadarDetection(
                         target_id     = target.target_id,
                         range_m       = round(estimated_range_m, 1),
-                        angle_deg     = round((mirror_angle + 180.0) % 360.0, 1),
+                        angle_deg     = round(mirror_angle, 1),
                         snr_db        = round(snr_db_bin, 1),
                         estimated_rcs = round(estimated_rcs, 4),
                     )
@@ -671,8 +671,12 @@ class RadarScenario(Scenario):
                         best_det[target.target_id] = det
 
             compressed = self._log_compress(power_bins)
-            back_angle = (mirror_angle + 180.0) % 360.0
-            sweep_data.append({"angle_deg": float(back_angle), "range_bins": self._downsample_bins(compressed).tolist()})
+            sweep_data.append({
+                "angle_deg": float(mirror_angle), # FIXED: Removed + 180.0
+                "range_bins": self._downsample_bins(compressed).tolist()
+            })
+
+        sweep_data.sort(key=lambda item: item["angle_deg"])
 
         return RadarScanResult(
             timestamp  = 0.0,
@@ -930,9 +934,17 @@ class RadarScenario(Scenario):
     ) -> np.ndarray:
         eps      = 1e-30
         safe     = np.where(np.isfinite(power_bins), power_bins, eps)
+        
+        # Convert raw linear power to dBm. (This will be negative, e.g., -100 dBm)
         power_db = 10.0 * np.log10(np.maximum(safe, eps))
-        peak_db  = float(np.max(power_db))
-        floor_db = peak_db - dynamic_range_db
+        
+        # Find the actual peak of the current sweep line
+        peak_db = float(np.max(power_db))
+        
+        display_peak_db = max(peak_db, -80.0) 
+        
+        floor_db = display_peak_db - dynamic_range_db
+        
         return np.clip((power_db - floor_db) / dynamic_range_db, 0.0, 1.0)
 
 
