@@ -164,9 +164,11 @@ class VesselSpec(BaseModel):
 
 
 class CreateVesselScenarioRequest(BaseModel):
-    session_id:  str        = Field(..., description="Arbitrary client-chosen key")
-    probe:       ProbeSpec
-    vessel_spec: VesselSpec
+    session_id:        str
+    probe:             ProbeSpec
+    vessel_spec:       VesselSpec
+    probe_origin_x_mm: float = Field(0.0, description="Probe surface X (mm)")
+    probe_origin_z_mm: float = Field(0.0, description="Probe surface Z (mm)")
 
 
 class CreateVesselScenarioResponse(BaseModel):
@@ -207,11 +209,13 @@ class ColorDopplerResponse(BaseModel):
     power_grid:        List[List[float]]
 
 class CreateScenarioRequest(BaseModel):
-    session_id:          str
-    probe:               ProbeSpec
-    use_shepp_logan:     bool = True
-    shepp_logan_scale_mm: float = Field(60.0, gt=0, description="Physical size of the Shepp-Logan phantom")
-    phantom_spec:        Optional[PhantomSpec] = None
+    session_id:           str
+    probe:                ProbeSpec
+    use_shepp_logan:      bool = True
+    shepp_logan_scale_mm: float = Field(60.0, gt=0)
+    phantom_spec:         Optional[PhantomSpec] = None
+    probe_origin_x_mm:    float = Field(0.0, description="Probe surface X position in phantom space (mm)")
+    probe_origin_z_mm:    float = Field(0.0, description="Probe surface Z position in phantom space (mm)")
 
 
 class CreateScenarioResponse(BaseModel):
@@ -462,9 +466,17 @@ def create_scenario(req: CreateScenarioRequest):
     # ── 3. Instantiate and store scenario ────────────────────
     # Pass shifted_regions into the engine so per-scatterer shadowing
     # uses true impedances in the correct (z-shifted) coordinate space.
-    engine   = PulseEchoEngine(array=cfg, environment=env, regions=shifted_regions)
-    # regions= kept on UltrasoundScenario for API compatibility but unused
-    scenario = UltrasoundScenario(config=cfg, environment=env, engine=engine)
+
+    engine = PulseEchoEngine(
+        array=cfg, environment=env, regions=shifted_regions,
+        probe_origin_x=req.probe_origin_x_mm,
+        probe_origin_z=req.probe_origin_z_mm,
+    )
+    scenario = UltrasoundScenario(
+        config=cfg, environment=env, engine=engine,
+        probe_origin_x=req.probe_origin_x_mm,
+        probe_origin_z=req.probe_origin_z_mm,
+    )
     _sessions[req.session_id] = scenario
 
     return CreateScenarioResponse(
@@ -554,9 +566,16 @@ def create_vessel_scenario(req: CreateVesselScenarioRequest):
         background_noise        = v.background_noise,
     )
 
-    engine   = PulseEchoEngine(array=cfg, environment=env, regions=None)
-    # No tissue regions for vessel scenario — shadowing disabled
-    scenario = UltrasoundScenario(config=cfg, environment=env, engine=engine)
+    engine = PulseEchoEngine(
+        array=cfg, environment=env, regions=None,
+        probe_origin_x=req.probe_origin_x_mm,  # add to CreateVesselScenarioRequest too
+        probe_origin_z=req.probe_origin_z_mm,
+    )
+    scenario = UltrasoundScenario(
+        config=cfg, environment=env, engine=engine,
+        probe_origin_x=req.probe_origin_x_mm,
+        probe_origin_z=req.probe_origin_z_mm,
+    )
     _sessions[req.session_id] = scenario
 
     return CreateVesselScenarioResponse(

@@ -26,10 +26,14 @@ class PulseEchoEngine:
       • Two bone layers       →  shadow weight ≈ 0.01-0.25   →  near blackout
     """
 
-    def __init__(self, array, environment, regions=None):
+    def __init__(self, array, environment, regions=None,
+                probe_origin_x: float = 0.0, probe_origin_z: float = 0.0):
         self.array = array
         self.environment = environment
-        self._regions = regions   # Optional List[TissueRegion]
+        self._regions = regions
+        self._probe_origin_x = probe_origin_x
+        self._probe_origin_z = probe_origin_z
+
 
     # ------------------------------------------------------------------
     # Shadow weight computation
@@ -55,7 +59,7 @@ class PulseEchoEngine:
         # Boundary scatterers have meaningful R; speckle scatterers have R << 0.01.
         # After removing the *5 scaling, true boundary R ≥ ~0.005 (soft tissue)
         # up to ~0.9 (bone).  We shadow only with scatterers whose R > 0.005.
-        SHADOW_THRESHOLD = 0.005
+        SHADOW_THRESHOLD = 0.15
         is_boundary = scat_r > SHADOW_THRESHOLD
 
         if not np.any(is_boundary):
@@ -94,7 +98,7 @@ class PulseEchoEngine:
                 # Is this boundary on the beam at its depth?
                 beam_x_at_bz = bz * sin_a
                 if abs(bx - beam_x_at_bz) <= BEAM_HALF_WIDTH_MM:
-                    T = 1.0 - br
+                    T = np.clip(1.0 - br, 0.3, 1.0)   # bone: T≈0.4 min, soft tissue excluded
                     cum_T *= T
 
                 b_ptr += 1
@@ -115,7 +119,7 @@ class PulseEchoEngine:
         fc = 5.0
         pulse_width = 0.2
 
-        x_positions = self.array._element_x_positions()
+        x_positions = self.array._element_x_positions() + self._probe_origin_x
 
         angle_rad = np.deg2rad(self.array.steering_angle)
         tx_delays = (x_positions * np.sin(angle_rad)) / c
@@ -130,8 +134,8 @@ class PulseEchoEngine:
         scat_a   = scat_r * shadow_w     # effective echo amplitude
 
         # ── Vectorised distances ─────────────────────────────────────────────
-        dx        = x_positions[:, np.newaxis] - scat_x[np.newaxis, :]
-        dz        = scat_z[np.newaxis, :]
+        dx = x_positions[:, np.newaxis] - scat_x[np.newaxis, :]
+        dz = self._probe_origin_z - scat_z[np.newaxis, :]   # was just scat_z
         distances = np.sqrt(dx**2 + dz**2)
 
         rx_tofs    = distances / c

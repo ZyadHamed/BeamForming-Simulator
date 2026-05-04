@@ -48,10 +48,13 @@ class UltrasoundScenario(Scenario):
         config: 'ArrayConfig',
         environment: Union['TargetEnvironment', 'DynamicEnvironment'],
         engine: 'PulseEchoEngine',
-        regions=None,   # kept for API compatibility but unused here
+        regions=None,   # kept for API compatibility but unused here,
+        probe_origin_x: float = 0.0, probe_origin_z: float = 0.0
     ):
         super().__init__(config, environment)
         self._engine = engine
+        self._probe_origin_x = probe_origin_x
+        self._probe_origin_z = probe_origin_z
 
     def perform_default_scan(self, max_depth_mm: float = 50.0) -> BModeResult:
         return self.generate_b_mode(start_angle=-45.0, end_angle=45.0,
@@ -79,17 +82,24 @@ class UltrasoundScenario(Scenario):
         tx_delays_raw = (x_positions * np.sin(angle_rad)) / c
         delay_offset  = -np.min(tx_delays_raw)
 
-        x_line = depths_mm * np.sin(angle_rad)
-        z_line = depths_mm * np.cos(angle_rad)
+        # ── FIXED: beam originates from probe surface, not phantom center ──
+        px = self._probe_origin_x
+        pz = self._probe_origin_z
 
-        dx = x_line[np.newaxis, :] - x_positions[:, np.newaxis]
-        dz = z_line[np.newaxis, :]
+        x_line = px + depths_mm * np.sin(angle_rad)
+        z_line = pz + depths_mm * np.cos(angle_rad)
+        # ──────────────────────────────────────────────────────────────────
+
+        # Element positions are also relative to probe origin
+        abs_element_x = x_positions + px
+
+        dx = x_line[np.newaxis, :] - abs_element_x[:, np.newaxis]
+        dz = z_line[np.newaxis, :] - pz   # elements sit at z = pz
 
         rx_distances    = np.sqrt(dx**2 + dz**2)
         times_of_flight = (depths_mm[np.newaxis, :] / c) + (rx_distances / c) + delay_offset
 
         summed_rf_signal = np.zeros(num_depth_samples)
-
         for i, el in enumerate(self.config.elements):
             if not el.enabled:
                 continue
@@ -131,6 +141,8 @@ class UltrasoundScenario(Scenario):
         image_db = 20.0 * np.log10((image_matrix / max_env) + 1e-9)
         dynamic_range = 50.0
         pixel_intensities = np.clip(image_db + dynamic_range, 0, dynamic_range)
+        pixel_intensities = pixel_intensities / dynamic_range  # ← add this line
+
 
         return BModeResult(
             sector_angles_deg=sector_angles.tolist(),
