@@ -102,6 +102,8 @@ class TowerRequest(BaseModel):
     num_elements: int
     element_spacing_mm: float
     max_coverage_radius_m: float
+    apodization: str = 'hamming'   # ✅ add this
+    snr: float = 100.0             # ✅ add this
 
 class TowerSetupRequest(BaseModel):
     towers: List[TowerRequest]
@@ -654,15 +656,23 @@ active_scenario: Optional[Telecom5GScenario] = None
 # ── 5G Endpoints ───────────────────────────────────────────────────
 
 @app.post("/5g-scenario/towers")
+@app.post("/5g-scenario/towers")
 def set_towers(req: TowerSetupRequest):
     global active_scenario
-    sim_towers = [
-        Tower5G(
+    sim_towers = []
+    for t in req.towers:
+        tower = Tower5G(
             tower_id=t.tower_id, x_m=t.x_m, y_m=t.y_m,
             num_elements=t.num_elements, element_spacing_mm=t.element_spacing_mm,
             max_coverage_radius_m=t.max_coverage_radius_m
-        ) for t in req.towers
-    ]
+        )
+        # ✅ Apply snr and apodization to all 3 sectors
+        for sector in tower.sectors:
+            sector.array_config.snr = t.snr
+            sector.array_config.apodization_window = t.apodization
+            sector.array_config.apply_apodization()
+        sim_towers.append(tower)
+
     if active_scenario is None:
         active_scenario = Telecom5GScenario(towers=sim_towers, users=[])
     else:

@@ -245,6 +245,8 @@ get liveBeamUser(): MobileUser | null {
       tower_id: t.id, x_m: t.x / PX_PER_METER, y_m: t.y / PX_PER_METER,
       num_elements: t.array.numElements, element_spacing_mm: t.array.elementSpacing,
       max_coverage_radius_m: t.range / PX_PER_METER,
+      apodization: t.apodization,   // ✅ add this
+      snr: t.snr,                   // ✅ add this
     }));
     this.service.initTowers(payload).subscribe({
       next: () => { this.towersInitialized = true; this.syncUsersToBackend(); },

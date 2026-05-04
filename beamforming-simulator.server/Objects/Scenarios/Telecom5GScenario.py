@@ -110,17 +110,28 @@ class Telecom5GScenario:
         self.tx_power_dbm = 43.0            
         self.channel_bandwidth_mhz = 100.0  
 
-    def assign_users_to_sectors(self):
+    def assign_users_to_sectors(self, alpha: float = 0.5):
         assignments = {t: {s: [] for s in t.sectors} for t in self.towers}
         dropped_users = []
 
+        max_dist = max(t.max_coverage_radius_m for t in self.towers)
+        freq_hz = 3500.0 * 1e6
+
+        def compute_score(dist: float, sector_snr: float) -> float:
+            if dist <= 0:
+                dist = 0.1
+            dist_norm = dist / max_dist          # 0..1, lower is better
+            snr_norm  = sector_snr / 100.0       # baseline is 100 dB per ArrayConfig
+
+            return alpha * dist_norm - (1.0 - alpha) * snr_norm  # lower score wins
+
         for user in self.users:
-            dx_list = [(t, math.sqrt((user.x_m - t.x_m)**2 + (user.y_m - t.y_m)**2))
-                    for t in self.towers]
+            dx_list = [
+                (t, math.sqrt((user.x_m - t.x_m)**2 + (user.y_m - t.y_m)**2))
+                for t in self.towers
+            ]
 
             # ── Sticky logic ──────────────────────────────────────────
-            # If the user has a current tower, check if they're still in range of it.
-            # If yes, lock them to it regardless of whether a closer tower exists.
             assigned_tower = None
             if user.current_tower_id:
                 current_tower = next((t for t in self.towers if t.tower_id == user.current_tower_id), None)
@@ -129,15 +140,19 @@ class Telecom5GScenario:
                         (user.x_m - current_tower.x_m)**2 + (user.y_m - current_tower.y_m)**2
                     )
                     if dist_to_current <= current_tower.max_coverage_radius_m:
-                        assigned_tower = current_tower  # sticky — stay put
+                        assigned_tower = current_tower
 
-            # ── Normal assignment (new user or current tower lost) ────
+            # ── SNR + Distance composite assignment ───────────────────
             if not assigned_tower:
-                min_dist = float('inf')
+                best_score = float('inf')
                 for tower, dist in dx_list:
-                    if dist < min_dist and dist <= tower.max_coverage_radius_m:
-                        min_dist = dist
-                        assigned_tower = tower
+                    if dist <= tower.max_coverage_radius_m:
+                        # Use the best sector SNR for this tower candidate
+                        best_sector_snr = max(s.array_config.snr for s in tower.sectors)
+                        score = compute_score(dist, best_sector_snr)
+                        if score < best_score:
+                            best_score = score
+                            assigned_tower = tower
 
             if not assigned_tower:
                 dropped_users.append(user.user_id)
@@ -148,25 +163,25 @@ class Telecom5GScenario:
             dy = user.y_m - assigned_tower.y_m
             global_angle = math.degrees(math.atan2(dx, dy))
 
-            best_sector = None
+            best_sector    = None
             min_angle_diff = float('inf')
-            local_angle = 0.0
+            local_angle    = 0.0
 
             for sector in assigned_tower.sectors:
                 diff = (global_angle - sector.boresight_angle_deg + 180) % 360 - 180
                 if abs(diff) < min_angle_diff:
                     min_angle_diff = abs(diff)
-                    best_sector = sector
-                    local_angle = diff
+                    best_sector    = sector
+                    local_angle    = diff
 
             assignments[assigned_tower][best_sector].append(
-                (user, math.sqrt((user.x_m - assigned_tower.x_m)**2 + (user.y_m - assigned_tower.y_m)**2),
+                (user,
+                math.sqrt((user.x_m - assigned_tower.x_m)**2 + (user.y_m - assigned_tower.y_m)**2),
                 global_angle, local_angle)
             )
 
         return assignments, dropped_users
-    
-    
+
     def compute_superimposed_beam_pattern(self, sector: TowerSector, local_angles_deg: List[float]):
         """
         Calculates MU-MIMO beam pattern for a SINGLE sector panel.
